@@ -123,7 +123,8 @@ async def register_agent(reg_key: str, name: str, description: str) -> dict[str,
         return {"id": d["id"], "api_key": d["api_key"]}
 
 
-async def main(fresh_room: str | None = None, activate: bool = False, customer: str | None = None) -> int:
+async def main(fresh_room: str | None = None, activate: bool = False, customer: str | None = None,
+               camera_also: list[str] | None = None) -> int:
     creds.require_no_live_run()
     env = env_file()
     # Which customer this room serves (config.CUSTOMERS: room key -> (human, agent, container)).
@@ -150,6 +151,12 @@ async def main(fresh_room: str | None = None, activate: bool = False, customer: 
         data = {}
     data.setdefault("agents", {})
     data.setdefault("humans", {})
+    # Customers set up earlier (e.g. --customer acme-nepal) stay maintained by a plain `make setup`.
+    for _key, (h, ag, _c) in config.CUSTOMERS.items():
+        if h in data["humans"] and h not in humans:
+            humans.append(h)
+        if ag in data["agents"] and ag not in agents:
+            agents[ag] = (h, f"{ag}: the customer's own environment agent; shares facts only with consent")
 
     # Gateway users + registration keys
     gw: dict[str, httpx.AsyncClient] = {}
@@ -336,6 +343,9 @@ async def main(fresh_room: str | None = None, activate: bool = False, customer: 
     await brand_agents(data, gw, env, cust_human)
     if new_room:
         await wait_for_greetings(data, room["id"], cust_agent)
+    if camera_also:
+        cam = data.setdefault("camera", {})
+        cam["extra_rooms"] = sorted(set(cam.get("extra_rooms", [])) | set(camera_also))
     await ensure_camera(data, env, team["id"])
     creds.save(data)
 
@@ -383,15 +393,21 @@ async def ensure_camera(data: dict[str, Any], env: dict[str, str], team_id: str)
         uid = check(await mm.get(f"/users/username/{CAMERA}"), "camera user")["id"]
         pw = (data.get("camera") or {}).get("password") or "Woym-camera-Pass-1!"  # older setup.py
     await mm.post(f"/teams/{team_id}/members", json={"team_id": team_id, "user_id": uid})
+    extra = [data["rooms"][k]["channel_id"] for k in (data.get("camera") or {}).get("extra_rooms", [])
+             if k in (data.get("rooms") or {})]
     want = data["room"]["channel_id"]
-    await mm.post(f"/channels/{want}/members", json={"user_id": uid})
+    for ch_id in [want, *extra]:
+        await mm.post(f"/channels/{ch_id}/members", json={"user_id": uid})
     left = []
     for ch in (await mm.get(f"/users/{uid}/teams/{team_id}/channels")).json():
-        if ch["id"] != want and ch.get("type") in ("O", "P"):
+        if ch["id"] not in [want, *extra] and ch.get("type") in ("O", "P"):
             rr = await mm.delete(f"/channels/{ch['id']}/members/{uid}")
             left.append(f"{ch['name']}:{rr.status_code}")
-    data["camera"] = {"username": CAMERA, "mm_user_id": uid, "password": pw, "channel_id": want}
-    say(f"camera viewer in {data['room']['name']} only (left: {', '.join(left) or 'none'})")
+    extra_rooms = (data.get("camera") or {}).get("extra_rooms", [])
+    data["camera"] = {"username": CAMERA, "mm_user_id": uid, "password": pw, "channel_id": want,
+                      "extra_rooms": extra_rooms}
+    also = f" + {', '.join(extra_rooms)}" if extra_rooms else ""
+    say(f"camera viewer in {data['room']['name']}{also} only (left: {', '.join(left) or 'none'})")
 
 
 LABELS = {
@@ -481,8 +497,10 @@ if __name__ == "__main__":
     ap.add_argument("--activate", action="store_true", help="with --fresh-room: also make it the active room")
     ap.add_argument("--customer", metavar="KEY", help="customer from config.CUSTOMERS (e.g. acme-nepal): its human, "
                     "agent and rule; the room is stored as rooms.KEY unless --fresh-room names it")
+    ap.add_argument("--camera-also", action="append", metavar="KEY",
+                    help="also keep the camera viewer in rooms.KEY (e.g. acme-nepal, for an epilogue take); remembered")
     a = ap.parse_args()
     try:
-        sys.exit(asyncio.run(main(a.fresh_room, a.activate, a.customer)))
+        sys.exit(asyncio.run(main(a.fresh_room, a.activate, a.customer, a.camera_also)))
     except creds.LiveRunLocked as e:
         sys.exit(f"[setup] REFUSED: {e}")

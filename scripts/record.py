@@ -82,9 +82,10 @@ class CDP:
         self.handlers.setdefault(method, []).append(fn)
 
 
-def next_take() -> int:
+def next_take(prefix: str = "take") -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    nums = [int(m.group(1)) for p in OUT_DIR.glob("take-*.webm") if (m := re.match(r"take-(\d+)\.webm", p.name))]
+    pat = re.compile(rf"{re.escape(prefix)}-(\d+)\.webm")
+    nums = [int(m.group(1)) for p in OUT_DIR.glob(f"{prefix}-*.webm") if (m := pat.match(p.name))]
     return max(nums, default=0) + 1
 
 
@@ -98,7 +99,7 @@ def newest_root(tok: str, channel_id: str) -> str | None:
     return None
 
 
-def mm_session(viewer: str) -> tuple[str, str, str, str]:
+def mm_session(viewer: str, room_key: str | None = None) -> tuple[str, str, str, str]:
     """Log the viewer in to Mattermost (session token for the browser cookie).
     Returns (token, user_id, team_name, channel_name)."""
     data = creds.load()
@@ -115,7 +116,8 @@ def mm_session(viewer: str) -> tuple[str, str, str, str]:
         {"user_id": uid, "category": "onboarding_task_list", "name": "onboarding_task_list_show", "value": "false"},
         {"user_id": uid, "category": "onboarding_task_list", "name": "onboarding_task_list_open", "value": "false"},
     ])
-    ch = c.get(f"/channels/{data['room']['channel_id']}").json()
+    room = data["rooms"][room_key] if room_key else data["room"]
+    ch = c.get(f"/channels/{room['channel_id']}").json()
     team = c.get(f"/teams/{ch['team_id']}").json()["name"]
     return tok, uid, team, ch["name"]
 
@@ -205,11 +207,11 @@ async def record(args: argparse.Namespace) -> int:
         if pid:
             log(f"a demo is already running (lock pid {pid}); use --attach to record it, or wait")
             return 1
-    take = args.take or next_take()
-    out = OUT_DIR / f"take-{take}.webm"
-    stills = OUT_DIR / f"take-{take}-frames"
+    take = args.take or next_take(args.prefix)
+    out = OUT_DIR / f"{args.prefix}-{take}.webm"
+    stills = OUT_DIR / f"{args.prefix}-{take}-frames"
     stills.mkdir(parents=True, exist_ok=True)
-    tok, uid, team, chan = mm_session(args.viewer)
+    tok, uid, team, chan = mm_session(args.viewer, args.room)
     proc, wsurl, prof = await launch_chrome(args.headed, args.zoom)
     ff = None
     demo = None
@@ -282,7 +284,8 @@ async def record(args: argparse.Namespace) -> int:
                     await asyncio.sleep(1)
 
             base = f"{MM.replace('127.0.0.1', 'localhost')}/{team}"
-            channel_id = creds.load()["room"]["channel_id"]
+            d = creds.load()
+            channel_id = (d["rooms"][args.room] if args.room else d["room"])["channel_id"]
             seen_root = None if args.open_latest else newest_root(tok, channel_id)
 
             async def follow_thread():
@@ -368,6 +371,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Record the WOYM room (read-only viewer)")
     ap.add_argument("--viewer", default="camera", help="Mattermost user to watch as (default camera, made by setup)")
     ap.add_argument("--take", type=int, help="take number (default: next free)")
+    ap.add_argument("--room", help="watch rooms.<KEY> from credentials (e.g. acme-nepal) instead of the active room")
+    ap.add_argument("--prefix", default="take", help="output name prefix (default take → take-<n>.webm)")
     ap.add_argument("--zoom", type=float, default=1.25, help="page zoom for readability (default 1.25)")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--attach", action="store_true", help="don't run demo.py; just record --seconds")

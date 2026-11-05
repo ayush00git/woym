@@ -464,3 +464,17 @@ EOF
   - a 5.0 s clip in the 4 s beat 15 → ERROR, exit 1; a 3.8 s clip → WARNING (0.20 s slack).
 - **Impact:** once a voice is chosen, drop beat-NN.wav files into media/raw/vo/ and run one command.
 - **Workaround / next step:** media/raw/vo/ currently holds SILENT placeholders (see vo/PLACEHOLDERS.txt), and final.mp4 is the silent test build. Also dropped CAPTION_OVERRIDE: B's script now carries the beat 3 caption, and beat 3 was rebuilt from it.
+
+## [2026-11-05 19:39 IST] platform (switch-ba) | REGRESSION I shipped in A10: plain `make setup` crashed once kiran existed (fixed)
+- **Status:** fixed (needs commit)
+- **What happened:** after `setup --customer acme-nepal`, a plain `make setup` (the judge path) crashed with `KeyError: 'kiran'` in brand_agents. Branding looped over every agent in credentials (including nepal-env), but plain setup only logged in dev and meera. My A10 report said "re-runs idempotent with and without --customer". That was wrong: my check piped setup through `grep`, which hid the traceback and the missing "done" line, and I didn't check the exit code.
+- **Evidence:** `uv run python -m woym.switch.setup --camera-also acme-nepal` → Traceback … woym/switch/setup.py brand_agents … KeyError: 'kiran'. Committed in cda2e72.
+- **Impact:** after an epilogue setup, `make setup` failed. On a cold judge stack (no kiran yet) it would have passed, so the judge path itself was unaffected, but any re-run after `make setup-epilogue` failed.
+- **Workaround / next step:** setup now adds every customer already in credentials (config.CUSTOMERS humans/agents) to the humans it logs in and maintains. Re-checked with exit codes, no filters: plain `./scripts/setup.sh` rc=0 "done, no manual steps"; `setup --camera-also acme-nepal` rc=0. Rule for me: check rc and the "done" line, never just grepped output.
+
+## [-] platform (switch-ba) | Camera viewer added to acme-nepal for the epilogue take
+- **Status:** fixed
+- **What happened:** `uv run python -m woym.switch.setup --camera-also acme-nepal` (new flag, remembered in credentials camera.extra_rooms) → "camera viewer in acme-support-take1 + acme-nepal only". Mattermost posts a "camera added to the channel" system line in acme-nepal before the epilogue starts.
+- **Evidence:** setup output, rc=0.
+- **Impact:** record.py can watch acme-nepal as camera (`--room acme-nepal`).
+- **Workaround / next step:** none.
