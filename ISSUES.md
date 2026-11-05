@@ -370,3 +370,13 @@ EOF
 - **Evidence:** caught by reading the diff while checking credentials after the lead's 19:10 accidental setup run. The bad `stale()` returned "no fingerprint" for any non-empty credentials.
 - **Impact:** none, because it never ran.
 - **Workaround / next step:** with no fingerprint, `stale()` now rebuilds one from what the file recorded (room.bridge_id + humans.*.switch_user_id) and compares it with the live stack. Verified with a warm `make setup` before the A9 wipe: all "ok (kept)", fingerprint written, active room unchanged. Lesson: any code that can drop credentials gets a warm-stack run before a cold one.
+
+## [2026-11-05 19:18 IST] platform (switch-ba) | Two rooms, one agent process: YES (live). Use one connection per room
+- **Status:** fixed (question answered)
+- **What happened:** `uv run python scripts/killtest/two_rooms.py` used a throwaway agent kt2 (owner dev) and two throwaway rooms, then archived both rooms and channels. A human posted in MAIN and in SIDE after the agent had posted in SIDE.
+  - **V1:** two connections (one per room, different connection ids) in one process. MAIN received ✅, SIDE received ✅, posts landed in the right channels ✅, no eviction.
+  - **V2:** one `scope=single` connection with `rooms=main,side`, using connect_to_room(side) to post, then connect_to_room(main) back. MAIN ✅, but SIDE messages were NOT received afterwards (single scope keeps one claim), no eviction.
+  - **V3:** one `scope=all` connection + connect_to_room per post. MAIN ✅, SIDE ✅, posts in the right channels ✅, no eviction.
+- **Evidence:** var/killtest/two_rooms.json. Archived channels kt2-main-bd2b / kt2-side-3723 show "V1/V2/V3 agent posts in main|side" in the right channel each time. My script's immediate Mattermost read missed the main posts (it read too early, the same false alarm as the kill test); a later read shows them.
+- **Impact:** C's epilogue design works.
+- **Workaround / next step:** recommended V1: a second `WsSwitchClient(name, id, api_key, side_room_id)` in the same process. Each has its own connection id and claim, so posts can never go to the wrong room. V3 has a race: a concurrent task can post between connect_to_room(side) and post_message and land in the wrong room.
