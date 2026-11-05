@@ -92,9 +92,19 @@ async def test_full_flow_real_client_real_engines(tmp_path, bare, machine):
             for c in clients.values():
                 await asyncio.wait_for(c._connected.wait(), 15)
             await asyncio.sleep(0.5)
+            for n in names:   # live: each agent gets a join greeting from its own sender
+                fs.as_agent(n, f"Hi, {n} here and ready to help.")
+            fs.admin("dev added acme-env to the room.")
 
             root = fs.human("meera", "@triage payouts placed Friday 17:10 land on Monday for us. Works in your CI?")
             await wait_step(store, Step.CONSENT_PENDING, 90, fs)
+            # live: a refused address makes Switch auto-reply FROM the target, in the thread,
+            # possibly quoting the request (tag included). It must change nothing.
+            req = next(m.body for m in fs.log if "step=env_req" in m.body)
+            fs.as_agent("acme-env", f"@dev I only take instructions from my owner.\n> {req}", root)
+            fs.admin("Switch notice: acme-env refused a message.", root)
+            await asyncio.sleep(1.0)
+            assert store.all()[-1].step == Step.CONSENT_PENDING
             fs.human("meera", "yes", root)
             await wait_step(store, Step.CONFIRMED_BOTH, 240, fs)
             fs.human("dev", "@triage patch it", root)
@@ -128,7 +138,8 @@ async def test_full_flow_real_client_real_engines(tmp_path, bare, machine):
     assert case.fix.sha == remote.ls_remote("fix/case-1", bare)
     assert machine.probe().bizclock == case.fix.sha
     # protocol: everything stayed in the case thread, hops via send_targeted, no step twice
-    assert all(m.thread_id == root for m in fs.log if m.id != root)
+    assert all(m.thread_id == root for m in fs.log if m.id != root and m.thread_id is not None)
+    assert all(m.thread_id == root for m in fs.log if "woym case=" in m.body)
     targeted = [(n, a["target_names"], tags.parse(a["body"])[1].value) for n, op, a in fs.ops
                 if op == "send_targeted_message"]
     assert len(targeted) == len(set((n, s) for n, _, s in targeted))

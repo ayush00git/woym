@@ -238,3 +238,18 @@ async def test_unrelated_thread_chatter_is_ignored(tmp_path):
     await w.say("dev", "looks good")
     await w.say("meera", "thanks all")
     assert len(w.bus.log) == n + 2 and w.case().step == Step.CONFIRMED_BOTH
+
+
+async def test_greetings_refusals_and_notices_are_ignored(tmp_path):
+    """Live: join greetings and Switch's refusal auto-replies arrive from the
+    agent's own sender, untagged or quoting the request. Admin notices are system."""
+    w = World(tmp_path)
+    await w.report()
+    req = next(p.text for p in w.bus.log if "step=env_req" in p.text)
+    before = (w.case().step, len(w.bus.log))
+    for name, text in [("acme-env", "Hi, acme-env here."), ("acme-env", f"@dev I only take instructions from my owner.\n> {req}"),
+                       ("runner", "@dev I only take instructions from my owner.")]:
+        w.bus._emit(name, "agent", text, w.root)
+    w.bus._emit("admin", "system", "acme-env refused a message.", w.root)
+    await w.bus.settle()
+    assert (w.case().step, len(w.bus.log)) == (before[0], before[1] + 4)

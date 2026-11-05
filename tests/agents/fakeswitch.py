@@ -18,18 +18,28 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import uuid
 from dataclasses import dataclass, field
 
 import httpx
 import websockets
 
 
+# Shapes follow live 0.31.0 (A's notes): agent senders are "@switch-agent-<8 hex>",
+# humans come through the Mattermost bridge, ids are "sw_<32 hex>", and
+# list_participants ids are UUIDs (the client maps kinds by name).
+BRIDGE = "0b1d6e7a-0000-4000-8000-000000000001"
+
+
 def agent_pid(name: str) -> str:
-    return f"@switch-agent-{name}:localhost"
+    return f"@switch-agent-{uuid.uuid5(uuid.NAMESPACE_DNS, name).hex[:8]}:localhost"
 
 
 def human_pid(name: str) -> str:
-    return f"@switch-user-{name}:localhost"
+    return f"@switch-mattermost-{BRIDGE}-{name}:localhost"
+
+
+ADMIN = "@switch-admin:localhost"
 
 
 @dataclass
@@ -52,7 +62,7 @@ class FakeSwitch:
         self.log: list[Msg] = []
         self.ops: list[tuple[str, str, dict]] = []  # (agent name, op, args)
         self.pongs: dict[str, int] = {}
-        self._seq = itertools.count(1)
+        self._seq = itertools.count(9_007_199_254_000_000)  # live sequence ids are ~9e15
         self._server = None
         self.port = 0
 
@@ -86,20 +96,29 @@ class FakeSwitch:
 
     def _emit(self, sender: str, name: str, body: str, thread_id: str | None, targets=()) -> Msg:
         seq = next(self._seq)
-        m = Msg(f"p{seq}", sender, name, body, self._root(thread_id), list(targets))
+        m = Msg(f"sw_{uuid.uuid4().hex}", sender, name, body, self._root(thread_id), list(targets))
         self.log.append(m)
         for aid, q in self.queues.items():
             frame = {"event": "message", "id": seq, "data": {
                 "type": "message", "room_id": self.room_id, "bridge_id": None, "channel_type": "channel_public",
                 "sequence": seq,
                 "payload": {"addressed": self.agents[aid] in m.targets, "sender": sender, "sender_name": name,
-                            "message_id": m.id, "body": body, "timestamp": seq, "thread_id": m.thread_id,
-                            "attachments": []}}}
+                            "sender_kind": None, "on_behalf_of": None, "opening_message": None,
+                            "sender_role": None, "message_id": m.id, "body": body, "timestamp": seq,
+                            "thread_id": m.thread_id, "attachments": []}}}
             q.put_nowait(frame)
         return m
 
     def human(self, name: str, body: str, thread_id: str | None = None) -> str:
         return self._emit(human_pid(name), name, body, thread_id).id
+
+    def as_agent(self, name: str, body: str, thread_id: str | None = None) -> str:
+        """An untagged post FROM an agent's sender that our code didn't write:
+        a join greeting, or Switch's refusal auto-reply on the agent's behalf."""
+        return self._emit(agent_pid(name), name, body, thread_id).id
+
+    def admin(self, body: str, thread_id: str | None = None) -> str:
+        return self._emit(ADMIN, "admin", body, thread_id).id
 
     # -------------------------------------------------------------------- ws
 
@@ -153,13 +172,17 @@ class FakeSwitch:
         if op == "connect_to_room":
             res = {"room_id": args.get("room_id")}
         elif op == "list_participants":
-            res = [{"id": agent_pid(n), "name": n, "type": "agent"} for n in self.agents.values()]
-            res += [{"id": human_pid(h), "name": h, "type": "user"} for h in self.humans]
+            # live: UUID ids; the message sender ids above differ, and the client maps by name
+            res = [{"id": str(uuid.uuid5(uuid.NAMESPACE_URL, n)), "name": n, "type": "agent", "status": "live"}
+                   for n in self.agents.values()]
+            res += [{"id": str(uuid.uuid5(uuid.NAMESPACE_URL, h)), "name": h, "type": "user", "status": None}
+                    for h in self.humans]
         elif op == "post_message":
             res = {"event_id": self._emit(agent_pid(name), name, args["body"], args.get("thread_id")).id}
         elif op == "send_targeted_message":
             targets = args["target_names"]
-            m = self._emit(agent_pid(name), name, args["body"], args.get("thread_id"), targets)
+            body = " ".join(f"@{t}" for t in targets) + " " + args["body"]  # live server prepends targets
+            m = self._emit(agent_pid(name), name, body, args.get("thread_id"), targets)
             res = {"event_id": m.id, "target_statuses": {t: "live" for t in targets if t in self.agents.values()}}
         elif op == "read_context":
             res = {"threads": []}
