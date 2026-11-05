@@ -1,0 +1,13 @@
+Works On Your Machine (WOYM)
+Copyright 2026 Ayush (ayush00git)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+fixtures/bizclock is a fictional library written for this demo. Its
+author names, commit history and dates are made up to look like a real
+project (built by fixtures/build-bizclock-history.sh). The MIT license
+file inside it belongs to that fiction; all code in this repository,
+including the fixture, is provided under the Apache License 2.0 above.
+
+This project runs against Switch (https://github.com/sandbox-quantum/switch),
+which is pulled as container images at run time and is not included here.

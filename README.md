@@ -1,7 +1,7 @@
 # Works On Your Machine (WOYM)
 
 > **"Works on my machine." Now proven on yours.**
-> The vendor's agents and the customer's own agent work one bug together in one [Switch](https://github.com/sandbox-quantum/switch) room. They go from *"can't reproduce"* to *"fixed on your machine"*, and the customer approves every step in chat.
+> The vendor's agents and the customer's own agent work one bug together in one [Switch](https://github.com/sandbox-quantum/switch) room. They go from *"can't reproduce"* to *"fixed on your machine"*, and the customer approves, in chat, everything that touches her machine or her data.
 
 Built for the **Flip the Switch** hackathon (WeMakeDevs × DevTools Academy × Switch), Track 01: Best Business Workflow.
 
@@ -28,7 +28,7 @@ One Mattermost channel, bridged by Switch. Its agents belong to **two different 
 | `triage` | dev (vendor) | runs the case and posts the cards |
 | `runner` | dev (vendor) | runs the customer's repro in a throwaway, network-less Docker sandbox, and bisects the environment |
 | `fixer` | dev (vendor) | **Claude Code** (`claude -p`) writes a failing test and the fix |
-| `acme-env` | **meera (customer)** | runs only on the customer's machine, runs only allow-listed probes, and asks Meera before anything leaves |
+| `acme-env` | **meera (customer)** | acts only on the customer's machine, runs only allow-listed probes, and asks Meera before anything leaves |
 
 The flow, all in one Mattermost thread:
 
@@ -37,8 +37,8 @@ The flow, all in one Mattermost thread:
 3. **Suspect lineup.** The vendor and customer environments differ in 5 places: node, locale, OS, library version, timezone.
 4. **Bisect.** `runner` re-runs the repro with one customer value at a time: ✅ ✅ ✅ ✅ ❌. **Culprit: `TZ=Asia/Kolkata`.**
 5. **Confirmed on both machines.** Meera's own agent runs the repro **on her machine** with `TZ=UTC` (passes) and as-is (fails).
-6. **Switch enforces the boundary.** When dev tries to command Meera's agent directly, **Switch itself** refuses: *"You're not permitted to direct messages to me in this room."* That text isn't in our code; it's Switch applying Meera's rule.
-7. **Fix.** Dev replies "patch it". Claude Code writes a failing test and the fix. Our gate accepts it only if the new test fails on the old code and the suite passes in both UTC and IST. `runner` then checks a 4-environment matrix.
+6. **Switch enforces the boundary.** When dev tries to command Meera's agent directly, **Switch itself** refuses. In the recorded take it said: *"You're not permitted to direct messages to me in this room — my operator has restricted who can address me here."* (Switch varies the wording.) That text isn't in our code; it's Switch applying Meera's rule.
+7. **Fix.** Dev replies "patch it". Claude Code writes a failing test and the fix. Our gate accepts it only if the new test fails on the old code **in both UTC and IST**, and the full suite passes after the fix in both zones. `runner` then checks a 4-environment matrix.
 8. **✅ FIXED ON MEERA'S MACHINE.** After a second yes from Meera, her agent installs the patched build on her machine and re-runs the original repro. The vendor's claim is confirmed by the customer's side.
 
 ![Trust boundary: what crosses between vendor and customer, and what never does](docs/trust-boundary.svg)
@@ -47,15 +47,15 @@ The flow, all in one Mattermost thread:
 
 The next day, Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom in a separate room, through Kiran's own agent `nepal-env`, which belongs to a third owner. `triage` serves both rooms, gets Kiran's consented environment, and matches it against a record written when case #1 was fixed: "UTC offset isn't a whole number of hours".
 
-It only answers **KNOWN ISSUE · already fixed** after re-reading the evidence from Switch's room history. That evidence is the FIXED message posted by **the customer's own agent**, which Switch attributes to that agent, so the vendor can't forge it. The answer needs no sandbox run and no vendor human, and nothing about Meera crosses into Kiran's room: only the case number, the fix branch and sha, and the rule.
+It only answers **KNOWN ISSUE · already fixed** after re-reading the evidence from Switch's room history. That evidence is the FIXED message posted by **the customer's own agent**, which Switch attributes to that agent, so no vendor agent or vendor user can forge it. (Whoever runs the Switch server could rewrite its history. In this demo that's one laptop; in a real deployment the server would be run by neither party, or by the customer.) The answer needs no sandbox run and no vendor human, and nothing about Meera crosses into Kiran's room: only the case number, the fix branch and sha, and the rule. Limits: the match rule was written by us from case #1's root cause, not learned. Kiran's room has no fixer, so a case that doesn't match stops at *confirmed on both machines*.
 
 ## Live results
 
-Every number below is from a full run on one laptop against a local Switch 0.31.0 stack and Mattermost, on 2026-11-05.
+Every number below is from a run on one laptop against a local Switch 0.31.0 stack and Mattermost, on 2026-11-05. Times are on the demo clock, from `make demo` start, which includes about 2 s of agent start-up before the report is posted.
 
-| Run | Report → result |
+| Run | Demo clock → result |
 |---|---|
-| Up to *confirmed on both machines* (M1), with the refusal | **17.5 s** |
+| Up to *confirmed on both machines* (M1), first live run | **15.7 s** (the later refusal beat lands about 0.4 s after the CONFIRMED card) |
 | Full flow, stored reference fix (`FIXER=fixture`) | **28.6 s** |
 | Full flow, **real Claude Code fix** (`FIXER=claude`), first run | **78.0 s** (fix step 52.9 s, from request to pushed) |
 | Full flow, real Claude Code fix, with the stricter gate | **57.4 s** (`claude -p` 30.4 s; gate 0.3 s) |
@@ -84,7 +84,7 @@ We hit several surprises in Switch along the way (an `@name` inside an ordinary 
 ## Quickstart
 
 Requirements:
-- Linux or macOS with **Docker** (rootful Docker CE on Linux; we used Fedora 44);
+- **Linux** with **Docker** (rootful Docker CE; tested on Fedora 44). macOS is untested, and the reset and helper scripts use GNU `date` and `/proc`, so they won't run there as-is;
 - **[uv](https://docs.astral.sh/uv/)**, **git** and **Node ≥ 20** (the fixer runs bizclock's tests on the host);
 - optionally the **Claude Code CLI**, signed in, for the live fix.
 
@@ -103,16 +103,17 @@ make setup-epilogue       # optional: third owner kiran, room acme-nepal, kiran-
 make demo-epilogue FIXER=fixture   # full flow, then Kiran's KNOWN ISSUE answer
 ```
 
-Then open Mattermost at http://localhost:8065 and watch `#acme-support`. `make reset` puts everything back to the pre-demo state in under a second.
+Then open Mattermost at http://localhost:8065 and watch `#acme-support`. `make reset` puts everything back to the pre-demo state (0.43 s when we measured it; a few seconds if it has to stop leftover sandbox containers).
 
-From a wiped stack (`./infra/switch/down.sh -v`, which removes the volumes; plain `make down` keeps them), the judge path needs no human steps. With images already pulled, `make up` took 12 s and `make setup` 7 s on our machine. Setup notices a new stack and throws away stale cached ids and keys on its own. `make test` runs the suite (200+ tests, including a full flow through the real client against a fake Switch server).
+From a wiped stack (`./infra/switch/down.sh -v`, which removes the volumes; plain `make down` keeps them), the judge path needs no human steps. With images already pulled, `make up` took 12 s and `make setup` 7 s on our machine. Setup notices a new stack and throws away stale cached ids and keys on its own. `make test` runs the suite: 250+ tests, including a full flow through the real client against a fake Switch server. That integration test and the Docker tests are skipped when Docker isn't available.
 
 ## Honest notes
 
 - **Meera's "laptop" is a container on the same host** (node 20, Debian bookworm, `TZ=Asia/Kolkata`). It isn't a second computer. The boundary in the demo is enforced by Switch ownership and addressing, plus `acme-env`'s allow-list, not by hardware. Anything with the host's Docker socket could reach it.
 - **The human lines in `make demo` are scripted.** Meera's report, her two "yes" replies and dev's messages are posted through the Mattermost API by `scripts/humans.py`, and the demo output labels them `[SCRIPTED]`. The agents treat them like any human message.
 - **`FIXER=fixture`** applies a stored reference patch instead of calling Claude, and every chat card says so ("FIXTURE patch, replayed, not generated").
-- **The fixer runs bizclock's tests on the host**, because it's the vendor's own repo. Customer repros only ever run inside the hardened sandbox or on the customer's container.
+- **Model-written code runs on the host, not in the sandbox.** `claude -p` edits a throwaway clone in `var/work/case-n` with only allow-listed tools (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash(node *)`, `Bash(npm test*)`). Our gate then runs the edited tests with `node` on the host. Nothing is pushed unless the gate passes. Customer repros only ever run inside the hardened sandbox or on the customer's container.
+- **If Claude's fix fails the gate, the fixer falls back loudly** to the stored reference patch. The thread says so ("Falling back to the stored FIXTURE patch") and an `ISSUES.md` entry is written. Both recorded live Claude runs since the stricter gate passed without a fallback.
 - We've run this on one machine, against the bundled Mattermost bridge only. It isn't tested with Slack, Teams or Discord yet.
 
 ## Security model
@@ -123,7 +124,7 @@ From a wiped stack (`./infra/switch/down.sh -v`, which removes the volumes; plai
   - every env value is validated.
 - **Customer side:**
   - `acme-env` can run 5 fixed, read-only probes and the customer's own repro, and only `tz`/`lang` can be overridden;
-  - every share and every install needs Meera's yes, in the case thread, from her account (checked by sender id).
+  - every share needs Meera's yes, and so does every install by default (`WOYM_INSTALL_CONSENT=0` skips the second ask). The yes has to be in the case thread and from her account, checked by her Switch sender id since commit 9a26ff9. Earlier runs, including the recorded take, matched her handle instead.
 - **Routing is code, not model output.** Every (step, recipient) pair is fixed in `woym/agents/*.py`. The only model in the system, `claude -p` in `fixer`, writes code and one line of prose, and its commit sha is read with `git ls-remote`, never from model text.
 
 ## Repo map
@@ -143,3 +144,7 @@ docs/            contracts, Switch notes and usage map, trust diagram
 ## How it was built
 
 One human and four Claude Code sessions (a lead plus three coworkers), each owning one part of the repo. The plan, the ownership rules and every failure are in the open: see [PLAN.md](PLAN.md), [docs/contracts.md](docs/contracts.md) and [ISSUES.md](ISSUES.md).
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). `fixtures/bizclock` is a fictional library made for this demo; NOTICE explains its made-up authors and history.
