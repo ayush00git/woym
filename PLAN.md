@@ -146,7 +146,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 | When | Milestone | Gate |
 |---|---|---|
-| Nov 5, 23:00 | A2 kill test results; B1–B3 running locally; C1 tested | **GO (19:xx IST):** cross-owner addressing is Switch-enforced on live 0.31.0 |
+| Nov 5, 23:00 | A2 kill test results; B1–B3 running locally; C1 tested | **GO (reported 18:54 IST):** cross-owner addressing is Switch-enforced on live 0.31.0 |
 | Nov 6, 13:00 | A3–A5, B4–B5, C2–C3 done against the contracts | |
 | Nov 6, 18:00 | **M1**: report → NOT REPRODUCED → consent → lineup → bisect → CONFIRMED BOTH, in real Mattermost | Submittable on its own |
 | Nov 6, 23:59 | **M2**: fix → matrix → FIXED ON MEERA'S MACHINE | |
