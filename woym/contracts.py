@@ -41,7 +41,9 @@ Handler = Callable[[MessageEvent], Awaitable[None]]
 
 class SwitchClient(Protocol):
     """One connected agent. All hops between agents MUST use send_targeted:
-    an "@name" inside post() addresses nobody (verified in Switch source)."""
+    live, an "@name" inside post() DOES address that participant, and a refused
+    address triggers a visible refusal (kill test, docs/switch-notes.md §0), so
+    agent prose never contains "@<agent>"."""
 
     name: str
 

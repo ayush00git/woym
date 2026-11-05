@@ -12,7 +12,7 @@ How the WOYM components talk to each other. Types live in `woym/contracts.py`, p
 | `@acme-env` | **meera (customer)** | host, but only acts inside the `acme-laptop` container | custom rule `agents=[triage]`. Fallback: `anyone` + a sender allowlist in code | `@triage`; consent only from `meera` |
 
 Rules learned from the source:
-- An `@name` inside `post()` addresses nobody. Every agent-to-agent hop uses `send_targeted()`.
+- Every agent-to-agent hop uses `send_targeted()` (it returns a status per target). An `@name` inside `post()` **does** address that participant live; if the target's rule doesn't admit the sender, Switch posts a visible refusal. So agent prose never contains `@<agent>`; only humans (`@meera`, `@dev`) are pinged in text. (The ideation brief claimed the opposite; the kill test disproved it.)
 - An agent can't change its own addressing. The owner, or another agent with the same owner, sets it.
 - Humans never command `@runner`, `@fixer` or `@acme-env` directly. Vendor commands go through `@triage` ("@triage patch it"). Meera's accounts aren't linked to Switch users, so her addressing would be refused.
 - Run `!follow-ups off` in the room, so Meera's thread replies aren't routed to `@acme-env` as addressed messages and then refused on camera.
