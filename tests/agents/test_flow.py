@@ -253,3 +253,25 @@ async def test_greetings_refusals_and_notices_are_ignored(tmp_path):
     w.bus._emit("admin", "system", "acme-env refused a message.", w.root)
     await w.bus.settle()
     assert (w.case().step, len(w.bus.log)) == (before[0], before[1] + 4)
+
+
+async def test_redelivered_events_are_handled_once(tmp_path):
+    """A WS reconnect may replay the last event; a replayed report must not open a second case,
+    and a replayed agent reply must not re-run work."""
+    w = World(tmp_path)
+    await w.report()
+    report = w.bus.log[0]
+    w.bus.queue.append((report, "triage"))
+    await w.bus.settle()
+    assert len(w.store.all()) == 1
+    # a fresh triage process (restart): no in-memory seen set, but the store knows the thread
+    t2 = TriageAgent(w.bus.client("triage"), store=w.store, guard=w.bus.guard("triage"), sleep=w.bus.clock.sleep)
+    w.bus.attach(t2)
+    w.bus.queue.append((report, "triage"))
+    await w.bus.settle()
+    assert len(w.store.all()) == 1
+    runs = len(w.sandbox.calls)
+    req = next(p for p in w.bus.log if "step=sandbox_run" in p.text and p.sender == "triage")
+    w.bus.queue.append((req, "runner"))
+    await w.bus.settle()
+    assert len(w.sandbox.calls) == runs

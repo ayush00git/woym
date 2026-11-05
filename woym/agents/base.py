@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -32,6 +33,8 @@ class Agent:
         self.client = client
         self.guard = guard or SendGuard(self.name)
         self.sleep = sleep
+        # A reconnect resumes from a cursor; if that replays an event, handle it once.
+        self._seen: OrderedDict[str, None] = OrderedDict()
 
     # ---------------------------------------------------------------- sends
 
@@ -82,6 +85,13 @@ class Agent:
     async def handle(self, event: MessageEvent) -> None:
         if should_ignore(event, self.name):
             return
+        if event.message_id:
+            if event.message_id in self._seen:
+                log.info("%s: skipping redelivered %s", self.name, event.message_id)
+                return
+            self._seen[event.message_id] = None
+            if len(self._seen) > 2000:
+                self._seen.popitem(last=False)
         parsed = tags.parse(event.text)
         try:
             if parsed:

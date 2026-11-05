@@ -93,6 +93,8 @@ class TriageAgent(Agent):
         return max(cases, key=lambda c: c.id) if cases else None
 
     async def _open_case(self, event: MessageEvent) -> None:
+        if self.store.by_thread(event.room_id, event.message_id):
+            return  # this report already opened a case (redelivery after a restart)
         case = self.store.open_case(event.room_id, event.message_id, event.sender_name)
         case.vendor_env = self.vendor_env
         self._advance(case, Step.SANDBOX_RUN)
