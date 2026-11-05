@@ -277,3 +277,58 @@ EOF
 - **Evidence:** Joorabchi, Mirzaaghaei, Mesbah, MSR 2014, abstract on page 1: people.ece.ubc.ca/amesbah/resources/papers/mona-msr14.pdf; doi:10.1145/2597073.2597098. The URL in the ideation notes returns 404.
 - **Impact:** It would have been a factual error in the README, the video and the pitch.
 - **Workaround / next step:** All public text now says "about 17% of bug reports are marked non-reproducible and stay open about three months longer". The date-fns references are labelled as merged PRs (#1599, #1890) of the same bug class but a different symptom.
+
+## [2026-11-05 19:09 IST] platform (switch-ba) | Recorder take-901: thread pane stayed empty ("Catch up on your threads"); switched framing
+- **Status:** fixed
+- **What happened:** the first full take navigated to /<team>/threads/<root> as soon as the new root appeared. Mattermost showed the Followed threads list and an empty pane for the whole run, because the viewer didn't follow the thread yet. The recorder log said "following thread", so only the stills showed the failure.
+- **Evidence:** stills of take-901 (deleted after review); demo.py itself exited 0.
+- **Impact:** that take was unusable.
+- **Workaround / next step:** the recorder now clicks the root's reply button (Mattermost id CENTER_commentIcon_<root>) to open the thread in the right panel, expands it, and only marks it done when the panel contains the root. take-904 confirms it. Lesson: check stills, not just logs.
+
+## [2026-11-05 19:09 IST] platform (switch-ba) | Recording-room setup: small leftovers
+- **Status:** worked-around
+- **What happened:** (1) Archiving a Switch room (POST /gateway/rooms/{id}/archive → 200) did NOT archive its Mattermost channel; I archived kt-184812 and woym-selftest in MM directly (DELETE /api/v4/channels/{id} → 200). (2) The camera user can't leave Town Square (MM 400), so the sidebar shows acme-support-take1 + Town Square. (3) The channel top shows camera's own "You were added to the channel by @admin" and "@user and 5 others were added". "user" is the default MM account the Switch setup container creates.
+- **Evidence:** setup log "camera viewer in acme-support-take1 only (left: off-topic:200, town-square:400)".
+- **Impact:** cosmetic; covered mostly by the expanded thread panel.
+- **Workaround / next step:** none needed.
+
+## [2026-11-05 19:10 IST] agents (switch-90), logged by lead | Cross-review C6: 7 findings in switch/ and sandbox/ code
+- **Status:** open. #3 is mitigated in agents (dedupe by message id); the rest are assigned.
+- **What happened:** A read-only review of woym/switch, woym/sandbox, scripts/demo.py and scripts/reset.sh found no injection or traversal holes, but these 7 issues:
+  1. **[platform, medium]** Cached human participant ids, reg keys and MM tokens go stale after GNU Make 4.4.1
+Built for x86_64-redhat-linux-gnu
+Copyright (C) 1988-2023 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.. The new bridge UUID means triage rejects every human command.
+  2. **[platform, medium]** On a cold stack, setup may need a human message to learn sender ids, which leaves a MANUAL step and makes ./scripts/setup.sh
+[setup] gateway user dev ok (0c0929bd-b608-4bf6-a611-1821677eb7ca)
+[setup] gateway user meera ok (91765913-3496-4a7f-83a3-daa02d2b8147)
+[setup] agent triage ok (kept)
+[setup] agent runner ok (kept)
+[setup] agent fixer ok (kept)
+[setup] agent acme-env ok (kept)
+[setup] mattermost user dev ok
+[setup] mattermost user meera ok
+[setup] room acme-support-take1 ok (kept)
+[setup] acme-env added to room by meera
+[setup] link dev's mattermost account -> 200
+[setup] link meera's mattermost account -> 200
+[setup] triage addressing: anyone
+[setup] acme-env addressing: meera + meera's agents + triage (set by meera)
+[setup] display name 'triage · owner: dev (vendor)' -> 200
+[setup] display name 'runner · owner: dev (vendor)' -> 200
+[setup] display name 'fixer · owner: dev (vendor)' -> 200
+[setup] display name 'acme-env · owner: meera (Acme)' -> 200
+[setup] avatars: vendor agents blue, acme-env amber
+[setup] camera viewer in acme-support-take1 only (left: town-square:400)
+[setup] credentials -> /home/ayush/Documents/projects/switch/var/switch/credentials.json
+[setup] done, no manual steps exit 2. Not yet verified live.
+  3. **[platform, medium]** Undocumented whether  is inclusive. A replayed report could open a second case.
+  4. **[sandbox, medium]** Demo preflight doesn't check node images. On a cold machine the first  pulls inside the 90 s timeout and can fail as a sandbox error.
+  5. **[sandbox, low-medium]** An agent that dies after its ready line isn't detected; the demo waits out the whole step timeout.
+  6. **[platform, low]** credentials.tmp is written 0644 and chmod-ed afterwards, so secrets are briefly world-readable, and a fixed tmp name can race.
+  7. **[platform, low]** Predictable Gateway/MM user passwords (stack bound to 127.0.0.1 only).
+- **Evidence:** file:line refs in the review message: setup.py:97–222, client.py:241, creds.py:67, demo.py:110–122/325, runner.py:106.
+- **Impact:** 1, 2 and 4 hit exactly the judge path (fresh clone on a cold machine).
+- **Workaround / next step:** platform takes 1, 2, 3, 6 and 7, then runs a full cold-stack test (down -v → up → setup → demo). Sandbox takes 4 and 5.
