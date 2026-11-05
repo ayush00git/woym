@@ -26,14 +26,15 @@ DRAFT 3:00 video beat sheet. Owner: sandbox (switch-7c). Review: lead.
 | 9 | 1:40–2:00 | [MM] Dev: "patch it" → fixer "Working on case #1 with Claude Code" → Fix pushed card with Claude's summary; then a 4 s cut to [T] showing Claude's 4-line diff | Dev replies, patch it. Claude Code writes a failing test and the fix in a fresh clone. Our code runs the tests and pushes. The commit hash comes from git, never from the model. | 34 | ⏩ SPED UP · real time 30 s (claude -p 28.4 s) · test must fail on the old code in UTC and IST |
 | 10 | 2:00–2:08 | [MM] Matrix green card: 4/4 at the fix commit | The vendor re-runs the matrix. Four for four. | 8 | 4/4 green (real time) |
 | 11 | 2:08–2:22 | [MM] install-consent card → Meera: "yes" → ✅ FIXED ON MEERA'S MACHINE card, then FREEZE-FRAME the FIXED card for the rest of the beat (the take holds it only ~4.6 s) | And the last word goes to the customer. Her agent asks again, installs that exact commit, and re-runs her repro. Fixed on Meera's machine. | 24 | FIXED at 0:57 on the run clock (54 s after the report) · Claude Code run, real time |
-| 12 | 2:22–2:36 | [TB] trust-boundary diagram; highlight the three crossing arrows, then the "Never crosses" row | Only three things cross the room. Five consented values, results, and a commit hash. Shell access, other files, her code: never. | 21 | In the demo, Meera's laptop is a container on the same host |
-| 13 | 2:36–2:48 | [CARD] Switch feature table (see below) | Per-owner keys. Rules the vendor can't override. Targeted messages with delivery status. And one shared thread both companies can audit. | 20 | Switch 0.31.0, self-hosted |
-| 14 | 2:48–2:56 | [T] `make demo` running: the printed timeline scrolling, ending "DONE: case 1 reached fixed" | One command runs the whole case end to end. | 9 | make demo |
-| 15 | 2:56–3:00 | [CARD] "Works On Your Machine." / "'Works on my machine.' Now proven on yours." | Works on my machine. Now proven on yours. | 8 | WOYM · built on Switch |
+| 12 | 2:22–2:32 | [MM] epilogue take, room acme-nepal: Kiran's report → nepal-env consent card (Kiran's 5 values) → Kiran "yes" → triage's 🧾 KNOWN ISSUE · already fixed card | A team in Nepal hits the same bug. Their agent shares five values, with consent. Triage answers from Meera's verified fix. | 21 | The next customer · 0 sandbox runs · evidence re-read from Switch room history · 2.6 s |
+| 13 | 2:32–2:46 | [TB] trust-boundary diagram; highlight the three crossing arrows, then the "Never crosses" row | Only three things cross the room. Five consented values, results, and a commit hash. Shell access, other files, her code: never. | 21 | In the demo, Meera's laptop is a container on the same host |
+| 14 | 2:46–2:53 | [CARD] Switch feature table (see below) | Per-owner keys. Rules the vendor can't override. Targeted messages. One shared, auditable thread. | 13 | Switch 0.31.0, self-hosted |
+| 15 | 2:53–2:56 | [T] `make demo` running: the printed timeline scrolling, ending "DONE: case 1 reached fixed" | One command runs it all. | 5 | make demo |
+| 16 | 2:56–3:00 | [CARD] "Works On Your Machine." / "'Works on my machine.' Now proven on yours." | Works on my machine. Now proven on yours. | 8 | WOYM · built on Switch |
 
-**Total: 3:00, 301 words (1.67 words/s on average; the busiest beat is 2.17).**
+**Total: 3:00, 16 beats, 311 words (1.73 words/s on average). Every beat has ≥ 0.5 s of slack at 2.3 words/s (tightest: beat 16, 0.52 s).**
 
-## Beat 13: Switch feature table (on screen)
+## Beat 14: Switch feature table (on screen)
 
 Only features we used and saw live:
 
@@ -56,6 +57,7 @@ Only features we used and saw live:
 | real time 30 s · claude -p 28.4 s | live | take-905: fix_req 19.1 s → fix_pushed 49.2 s; fixer_agent.log "claude -p took 28.4s, $0.06" |
 | 4/4 green | live | take-905 matrix card at b6a243ead0 |
 | FIXED at 0:57 (54 s after the report) | live | take-905 demo.py "DONE: case 1 reached fixed in 57.0s"; report posted at 2.8 s |
+| 0 sandbox runs · evidence re-read · 2.6 s | live | first live epilogue, 2026-11-05 19:34 IST: case 2 history had no sandbox_run/bisect hop, runner.log silent, 0 containers in docker events; triage read_context 30 ms before the KNOWN card; report posted 30.2 s → KNOWN card 32.8 s. Swap in the numbers from A's epilogue take (recorded after the "uTC" fix, 9ee9f00) |
 | "11 days. 14 comments." | mock-up | media/cold-open.html, labelled MOCK-UP |
 
 ## Notes for the edit
@@ -64,6 +66,7 @@ Only features we used and saw live:
 - **Run clock:** an on-screen counter in the corner, showing seconds since the report, taken from the take's own timeline (demo.py prints it). Don't animate it from video time in sped-up or trimmed parts.
 - **Beat 9 diff:** take-905's commit b6a243e (2 files, +23 −4): `localOffsetHours` → `localOffsetMinutes(date) { return -date.getTimezoneOffset(); }`, `offsetMs = localOffsetMinutes(date) * MINUTE_MS`, plus test/half-hour-tz.test.js "half-hour offset zone (Asia/Kolkata): Fri 17:10 -> Fri 17:30", which sets process.env.TZ itself. Show the 4-line src hunk; regenerate it with `git --git-dir var/remotes/bizclock.git diff main b6a243e -- src/` (the remote keeps it until the next reset).
 - **Legibility:** at 1080p, MM cards are readable at 100% zoom; crop to the thread pane for beats 5–11. Leave the `woym case=… step=…` tag lines visible but small: they're honest evidence that every hop is an agent-to-agent message.
+- **Beat 12 (epilogue):** Kiran's thread only (room acme-nepal). Nothing of Meera's appears there (scan of the live run: 0 hits for her name, zone, agent or laptop), so no blurring is needed. The card must be from a take after 9ee9f00 ("UTC", not "uTC").
 - **Avoid on screen:** a stray "@acme-env" from anyone other than the scripted refusal beat. Switch would post a second refusal.
 
 ## Take-905 cue sheet (video position = 10.1 s + demo clock)
