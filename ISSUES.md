@@ -123,3 +123,10 @@ EOF
 - **Evidence:** infra/acme-laptop/Dockerfile (no `locales` package); the bisect shows `lang` doesn't flip the result.
 - **Impact:** Someone checking `locale` inside the container would see the locale missing. The "lang doesn't matter" result is still true for this bug.
 - **Workaround / next step:** none. Mention it in the README's honest notes if anyone asks.
+
+## [2026-11-05 20:50 IST] sandbox (switch-7c), logged by lead | reset.sh first version killed its own calling shell
+- **Status:** fixed
+- **What happened:** The first version of `scripts/reset.sh` found agents with `pgrep -f 'python.* -m woym\.agents\.'`. That also matched the shell running the test, because the pattern text was in its command line and its cwd was the repo, so reset killed its caller.
+- **Evidence:** Found by sandbox while testing reset from a dirty state, before the code was handed over.
+- **Impact:** None shipped. Any pattern-based process kill in the demo tooling could do the same thing.
+- **Workaround / next step:** reset now reads /proc/<pid>/cmdline and requires argv[0]=python*, argv[1]=-m and argv[2]=woym.agents.<name> exactly. It also checks the cwd is this checkout and skips $$ and $PPID.
