@@ -179,3 +179,23 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 5. **No larping.** Never report something as working unless you ran it. Say "untested" or "assumed" explicitly. Fixtures and replays must be labelled in code, chat output and docs.
 6. Use `uv run …` for Python and `uv add` only via the lead (to avoid lockfile races). Use `pytest` for tests.
 7. Keep `claude -p` usage small. It runs on the user's plan.
+
+## 7. Status at hand-off (Nov 5, 19:55 IST)
+
+**Done (committed locally):**
+- the product, live end to end;
+- the epilogue (WOYM_KNOWN);
+- the cold-stack judge path (zero manual steps);
+- `make fresh` (69 s, 254 tests);
+- README, audited, plus LICENSE (Apache-2.0) and NOTICE;
+- main footage (take-905) and the epilogue take (take-epi-2);
+- a 3:00 rough cut with captions (`media/raw/rough-cut.mp4`, regenerate with `scripts/video/build_rough_cut.py`);
+- the narration mixer;
+- blog and social drafts;
+- a pre-publish audit (clean).
+
+**Left for the user:**
+1. Record the narration with `docs/drafts/narration-recording.md`, then run `uv run python scripts/video/mix_narration.py`, which writes `media/raw/final.mp4` and `final.srt`.
+2. Upload the video; create the GitHub repo and push `main`; fill in the README's two placeholders (video link, clone URL).
+3. Optional: publish the blog and #HowISwitch posts from `docs/drafts/`.
+4. Submit on the WeMakeDevs page before **Nov 7, 23:59 IST**.
