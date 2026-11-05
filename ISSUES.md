@@ -454,3 +454,13 @@ EOF
 - **Evidence:** woym/case/card.py:268 `rule[:1].lower() + rule[1:]` applied to "UTC offset is not a whole number of hours".
 - **Impact:** a visible typo on the epilogue's KNOWN card, if it's recorded.
 - **Workaround / next step:** agents (C) to fix the casing; re-record the epilogue after the fix if it goes in the video.
+
+## [2026-11-05 19:38 IST] platform (switch-ba) | A12 narration mix ready: scripts/video/mix_narration.py (tested with placeholders only)
+- **Status:** fixed (placeholder-tested; no real voice yet)
+- **What happened:** `uv run python scripts/video/mix_narration.py` reads media/raw/vo/beat-NN.wav and places each clip at its beat start (beats come from docs/drafts/video-script.md). It checks each clip against its beat: past the 0.5 s slack → WARNING; past the beat → ERROR + exit 1 unless --force. It then does a two-pass EBU R128 loudnorm to -16 LUFS / -1.5 dBTP, muxes AAC 192k onto rough-cut.mp4 (video copied unchanged) → media/raw/final.mp4, and writes media/raw/final.srt from the narration column (≤ 2 lines, ~42–46 chars, timed across each clip's real length).
+- **Evidence:**
+  - silent placeholders (words / 2.3 s): final.mp4 180.0 s, 31 SRT cards; loudness reported as "silent input, not normalised" (silence can't be normalised; nothing faked);
+  - quiet 220 Hz tone placeholders: integrated **-15.9 LUFS**, true peak -14.5 dBFS → the loudness pass works;
+  - a 5.0 s clip in the 4 s beat 15 → ERROR, exit 1; a 3.8 s clip → WARNING (0.20 s slack).
+- **Impact:** once a voice is chosen, drop beat-NN.wav files into media/raw/vo/ and run one command.
+- **Workaround / next step:** media/raw/vo/ currently holds SILENT placeholders (see vo/PLACEHOLDERS.txt), and final.mp4 is the silent test build. Also dropped CAPTION_OVERRIDE: B's script now carries the beat 3 caption, and beat 3 was rebuilt from it.

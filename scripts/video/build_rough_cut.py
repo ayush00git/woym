@@ -409,9 +409,7 @@ def b_end(b) -> Path:
 
 BUILDERS = {1: b_cold_open, 2: b_stat_card, 3: b_members, 12: b_trust, 13: b_features, 14: b_terminal, 15: b_end}
 # Lead's decision (2026-11-05): beat 3 caption names the dimmed accounts instead of hiding them.
-CAPTION_OVERRIDE = {
-    3: "Owners come from registration keys · (small) admin/user: Switch's setup accounts · camera: the recording account",
-}
+CAPTION_OVERRIDE: dict[int, str] = {}  # beat 3's override was dropped once B's script matched the lead's wording
 EXTRA_CAPTION = {
     14: "replay of the recorded take's real output, sped up",
 }
