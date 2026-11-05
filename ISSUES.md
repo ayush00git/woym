@@ -485,3 +485,18 @@ EOF
 - **Evidence:** acme_env.py main() built `AcmeEnvAgent(c, DockerCustomerMachine(), ask_before_install=ask)` with no customer_id.
 - **Impact:** A Mattermost user who could appear with sender_name "meera" but a different id would have been accepted as Meera's consent. The live risk is low (a human sender_name is the MM username, and setup controls the users), but the security claim was overstated. Recorded takes before the fix used the handle check.
 - **Workaround / next step:** main() now passes humans.<customer>.switch_participant_id for acme-env and nepal-env, and logs a warning and falls back to the handle if it's missing. Test: tests/agents/test_flow.py::test_acme_env_main_checks_consent_by_sender_id.
+
+## [2026-11-05 19:43 IST] lead | README audit (C12): one false security claim and 10 overstated or unsupported lines, all fixed
+- **Status:** fixed (README 5414b30, code 9a26ff9)
+- **What happened:** Agents audited every README claim against code and evidence.
+  - **HIGH:** "consent checked by sender id" was false. acme-env only matched Meera's handle until 9a26ff9. Recorded takes before that commit used the handle check.
+  - **HIGH:** "Linux or macOS". The scripts use GNU `date +%N`, `/proc` and bash ≥ 4.4, so they're Linux-only. macOS is now marked untested.
+  - **MEDIUM:** The README omitted that model-written code (Claude's edits plus our gate's `node --test`) runs on the host.
+  - **MEDIUM:** The "vendor can't forge it" claim needs the caveat that whoever runs the Switch server could rewrite history.
+  - **MEDIUM:** The M1 "17.5 s" was the refusal beat's time, not M1 completion (15.7 s).
+  - **MEDIUM:** The "reset in under a second" figure had no logged evidence (the lead measured 0.43 s once; now stated).
+  - **MEDIUM:** Install consent is on by default but can be switched off.
+  - **LOWER:** "customer approves every step", "runs only on the customer's machine", the refusal wording, and the gate wording.
+- **Evidence:** C12 audit message; woym/fixer/workspace.py:run_tests; scripts/reset.sh; woym/agents/acme_env.py (ask_before_install, customer_id).
+- **Impact:** The README would have overstated security properties to judges.
+- **Workaround / next step:** Every finding is corrected in README and NOTICE. The video narration and blog must use the same corrected wording; sandbox and platform have been told.
