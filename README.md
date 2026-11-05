@@ -144,7 +144,7 @@ docs/            contracts, Switch notes and usage map, trust diagram
 
 ## How it was built
 
-One human and four Claude Code sessions (a lead plus three coworkers), each owning one part of the repo. The plan, the ownership rules and every failure are in the open: see [PLAN.md](PLAN.md), [docs/contracts.md](docs/contracts.md) and [ISSUES.md](ISSUES.md).
+One human and four Claude Code sessions (a lead plus three coworkers), each owning one part of the repo. The session names you'll see in the logs map to roles: `switch-b6` was the lead, `switch-ba` platform (Switch client, setup, recorder), `switch-7c` sandbox (bizclock, runner, customer machine, demo tooling), and `switch-90` agents (case logic, fixer, agents). The plan, the ownership rules and every failure are in the open: see [PLAN.md](PLAN.md), [docs/contracts.md](docs/contracts.md) and [ISSUES.md](ISSUES.md).
 
 ## License
 

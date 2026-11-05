@@ -1,6 +1,10 @@
 # secrets and local config
 .env
+.env.*
+!.env.example
 *.key
+*.pem
+credentials*.json
 
 # planning scratch (idea debate, kept local)
 .hack/

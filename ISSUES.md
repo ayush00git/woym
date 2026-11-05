@@ -16,7 +16,7 @@ cat >> ISSUES.md <<'EOF'
 EOF
 ```
 
-`<who>` is one of: lead, platform (switch-ba), sandbox (switch-7c), agents (switch-90).
+`<who>` is one of: lead, platform (switch-ba), sandbox (switch-7c), agents (switch-90). References to `.hack/…` point at local ideation notes (the three-architect idea debate) that aren't committed.
 
 ---
 
