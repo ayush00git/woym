@@ -185,7 +185,13 @@ class FakeSwitch:
             m = self._emit(agent_pid(name), name, body, args.get("thread_id"), targets)
             res = {"event_id": m.id, "target_statuses": {t: "live" for t in targets if t in self.agents.values()}}
         elif op == "read_context":
-            res = {"threads": []}
+            # threads as live 0.31.0 returns them: root + replies, entries {id, kind, sender, sender_name, body}
+            def entry(m):
+                return {"id": m.id, "kind": "message", "sender": m.sender, "sender_name": m.sender_name,
+                        "body": m.body, "timestamp": 0, "attachments": []}
+            roots = [m for m in self.log if m.thread_id is None]
+            res = {"threads": [{"root": entry(r), "replies": [entry(m) for m in self.log if m.thread_id == r.id]}
+                               for r in roots], "truncated": False}
         else:
             return httpx.Response(404, json={"detail": f"unknown op {op}"})
         return httpx.Response(200, json={"result": res})

@@ -125,12 +125,22 @@ async def to_thread(fn, *args):
     return await asyncio.to_thread(fn, *args)
 
 
-def run_agent(make: Callable[[SwitchClient], Agent], name: str) -> None:
-    """`python -m woym.agents.<name>` entry point using A's real client."""
+def run_agent(make: Callable[[SwitchClient], Agent], name: str, room: str | None = None) -> None:
+    """`python -m woym.agents.<name>` entry point using A's real client. `room` is a
+    room NAME from credentials.json `rooms` (default: the active room)."""
+    from woym.switch import creds
     from woym.switch.client import WsSwitchClient
 
     logging.basicConfig(level=logging.INFO, format=f"%(asctime)s {name} %(levelname)s %(message)s")
-    client = WsSwitchClient.from_credentials(name)
+    if room is None:
+        client = WsSwitchClient.from_credentials(name)
+    else:
+        data = creds.load()
+        rooms = data.get("rooms", {})
+        if room not in rooms:
+            raise SystemExit(f"room {room!r} not in credentials.json rooms ({sorted(rooms)}); run setup for it")
+        a = data["agents"][name]
+        client = WsSwitchClient(name, a["id"], a["api_key"], rooms[room]["id"])
     agent = make(client)
     log.info("%s starting (room %s)", name, getattr(client, "room_id", "?"))
 

@@ -249,3 +249,23 @@ def consent_prompt(case_id: int, customer: str, values: dict[str, str], requeste
             "**Reply `yes` in this thread** to allow, or `no` to refuse.",
         ]
     )
+
+
+# --------------------------------------------------------------------------
+# Known culprit (WOYM_KNOWN): answered from another case's verified fix
+# --------------------------------------------------------------------------
+
+
+def known(case_id: int, matched: str, rule: str, source_case: int, branch: str, sha: str) -> str:
+    """`matched` is THIS customer's own value, e.g. "tz=Asia/Kathmandu (UTC+05:45)".
+    Takes no Env from the earlier case: nothing about that customer leaks here."""
+    return "\n".join(
+        [
+            _header("🧾", "KNOWN ISSUE · already fixed", case_id, f"matches case #{source_case}"),
+            f"Your {_code(matched)}: the {rule[:1].lower() + rule[1:]}, the root cause found in case #{source_case}.",
+            f"Fixed in {_code(branch)} at {_code(sha[:10])}, **verified on a customer machine by that customer's "
+            "own agent**, with their consent. Switch attributes that FIXED message to their agent, and we re-checked it in room history.",
+            "_0 sandbox runs, no vendor human. Matched by a rule written from case "
+            f"#{source_case}'s root cause, not by a model._",
+        ]
+    )

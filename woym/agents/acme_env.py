@@ -44,7 +44,10 @@ class AcmeEnvAgent(Agent):
     name = config.AGENT_CUSTOMER
 
     def __init__(self, client: SwitchClient, machine: CustomerMachine, customer: str = config.CUSTOMER_HUMAN,
-                 customer_id: str | None = None, ask_before_install: bool = True, **kw) -> None:
+                 customer_id: str | None = None, ask_before_install: bool = True, name: str | None = None,
+                 **kw) -> None:
+        # The same agent code serves every customer (acme-env for meera, nepal-env for kiran).
+        self.name = name or self.name
         super().__init__(client, **kw)
         self.machine = machine
         self.customer = customer
@@ -181,11 +184,27 @@ def _err(e: Exception) -> str:
     return " ".join(f"{type(e).__name__}: {e}".split())[:300]
 
 
+def customer_for(agent: str) -> tuple[str, str, str]:
+    """(room name, customer human, container) for a customer agent, from config.CUSTOMERS."""
+    for room, (human, a, container) in config.CUSTOMERS.items():
+        if a == agent:
+            return room, human, container
+    raise SystemExit(f"{agent!r} is not a customer agent in config.CUSTOMERS")
+
+
 def main() -> None:
+    """`python -m woym.agents.acme_env` runs acme-env. WOYM_AGENT_NAME=nepal-env runs
+    the second customer's agent (epilogue) in its own room, on its own machine."""
     from woym.sandbox.customer import DockerCustomerMachine
 
     ask = os.environ.get("WOYM_INSTALL_CONSENT", "1") != "0"
-    run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(), ask_before_install=ask), config.AGENT_CUSTOMER)
+    name = os.environ.get("WOYM_AGENT_NAME", config.AGENT_CUSTOMER)
+    if name == config.AGENT_CUSTOMER:
+        run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(), ask_before_install=ask), name)
+        return
+    room, human, container = customer_for(name)
+    run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(container=container), customer=human,
+                                     ask_before_install=ask, name=name), name, room=room)
 
 
 if __name__ == "__main__":

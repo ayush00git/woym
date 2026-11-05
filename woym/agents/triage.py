@@ -16,7 +16,7 @@ import re
 from woym import config
 from woym.agents import wire
 from woym.agents.base import Agent, from_agent
-from woym.case import card, state, tags
+from woym.case import card, known, state, tags
 from woym.case.state import CaseStore, GuardError
 from woym.contracts import (ENV_KEYS, BisectReport, BisectStep, Case, Env, FixResult, MessageEvent, RunResult, Step,
                             SwitchClient)
@@ -24,15 +24,17 @@ from woym.contracts import (ENV_KEYS, BisectReport, BisectStep, Case, Env, FixRe
 PATCH_RE = re.compile(r"\b(patch|fix)\b", re.I)
 MENTION = "@" + config.AGENT_TRIAGE
 
+CUSTOMER = "<customer agent of this room>"  # resolved per room, see TriageAgent._customer
+
 # which agent may send triage each step
 STEP_SENDER = {
     Step.SANDBOX_RUN: config.AGENT_RUNNER,
     Step.BISECTING: config.AGENT_RUNNER,
     Step.MATRIX_GREEN: config.AGENT_RUNNER,
-    Step.CONSENT_PENDING: config.AGENT_CUSTOMER,
-    Step.ENV_RECEIVED: config.AGENT_CUSTOMER,
-    Step.CONFIRMED_BOTH: config.AGENT_CUSTOMER,
-    Step.FIXED_ON_CUSTOMER: config.AGENT_CUSTOMER,
+    Step.CONSENT_PENDING: CUSTOMER,
+    Step.ENV_RECEIVED: CUSTOMER,
+    Step.CONFIRMED_BOTH: CUSTOMER,
+    Step.FIXED_ON_CUSTOMER: CUSTOMER,
     Step.FIX_PUSHED: config.AGENT_FIXER,
 }
 
@@ -42,13 +44,24 @@ class TriageAgent(Agent):
 
     def __init__(self, client: SwitchClient, store: CaseStore | None = None, vendor_env: Env = config.VENDOR_ENV,
                  vendor_human: str = config.VENDOR_HUMAN, customer_human: str = config.CUSTOMER_HUMAN,
-                 human_ids: dict[str, str] | None = None, **kw) -> None:
+                 human_ids: dict[str, str] | None = None,
+                 customers: dict[str, tuple[str, str]] | None = None,
+                 known_store: known.KnownStore | None = None, known_on: bool | None = None, **kw) -> None:
         super().__init__(client, **kw)
         self.store = store or CaseStore()
         self.vendor_env = vendor_env
         self.vendor_human = vendor_human
         self.customer_human = customer_human
         self.human_ids = human_ids or {}  # handle -> sender id, checked when known
+        # room id -> (customer human, customer agent). Rooms not listed use the
+        # default pair, so with one room this is exactly the single-customer setup.
+        self.customers = customers or {}
+        self.known_on = known.enabled() if known_on is None else known_on
+        self.known = known_store or known.KnownStore()
+        self._event: MessageEvent | None = None  # the tagged event being handled
+
+    def _customer(self, room_id: str) -> tuple[str, str]:
+        return self.customers.get(room_id, (self.customer_human, config.AGENT_CUSTOMER))
 
     # ------------------------------------------------------------- humans
 
@@ -68,11 +81,12 @@ class TriageAgent(Agent):
         if not (mentioned or patch_in_thread):
             return
         is_vendor = self._is_human(event, self.vendor_human)
-        is_customer = self._is_human(event, self.customer_human)
+        customer_human = self._customer(event.room_id)[0]
+        is_customer = self._is_human(event, customer_human)
 
         if not (is_vendor or is_customer):
             await self.say(event.room_id, event.thread_id or event.message_id,
-                           f"I only take commands from @{self.vendor_human} and @{self.customer_human}. Ignoring.")
+                           f"I only take commands from @{self.vendor_human} and @{customer_human}. Ignoring.")
             return
 
         if PATCH_RE.search(event.text) and (thread_case or event.thread_id is None):
@@ -97,6 +111,15 @@ class TriageAgent(Agent):
             return  # this report already opened a case (redelivery after a restart)
         case = self.store.open_case(event.room_id, event.message_id, event.sender_name)
         case.vendor_env = self.vendor_env
+        if self.known_on and self.known.all():
+            # Known fixes exist: ask for the (consented) env first, so a match is
+            # answered with zero sandbox runs. No match -> bisect, which runs its own baseline.
+            self._advance(case, Step.ENV_REQUESTED)
+            await self._hop_out(case, Step.ENV_REQUESTED, self._customer(case.room_id)[1],
+                                f"Case #{case.id} opened. Please share these environment facts, with your owner's "
+                                "consent, so I can check them against fixes we've already verified.",
+                                keys=list(ENV_KEYS))
+            return
         self._advance(case, Step.SANDBOX_RUN)
         await self._hop_out(case, Step.SANDBOX_RUN, config.AGENT_RUNNER,
                             f"Case #{case.id} opened. Running the repro in our CI env first.",
@@ -106,6 +129,8 @@ class TriageAgent(Agent):
 
     async def on_tag(self, event: MessageEvent, case_id: int, step: Step, kv: dict[str, str]) -> None:
         owner = STEP_SENDER.get(step)
+        if owner == CUSTOMER:
+            owner = self._customer(event.room_id)[1]
         if owner is None or not from_agent(event, owner):
             return
         case = self.store.get(case_id)
@@ -135,6 +160,7 @@ class TriageAgent(Agent):
             Step.MATRIX_GREEN: self._on_matrix,
             Step.FIXED_ON_CUSTOMER: self._on_fixed,
         }[step]
+        self._event = event
         await handler(case, kv)
 
     async def _on_sandbox_run(self, case: Case, kv: dict[str, str]) -> None:
@@ -143,7 +169,7 @@ class TriageAgent(Agent):
             self._advance(case, Step.NOT_REPRODUCED)
             await self.say(case.room_id, case.thread_id, card.not_reproduced(case.id, run))
             self._advance(case, Step.ENV_REQUESTED)
-            await self._hop_out(case, Step.ENV_REQUESTED, config.AGENT_CUSTOMER,
+            await self._hop_out(case, Step.ENV_REQUESTED, self._customer(case.room_id)[1],
                                 f"Please share these environment facts for case #{case.id}, with your owner's consent.",
                                 keys=list(ENV_KEYS))
         else:
@@ -157,12 +183,15 @@ class TriageAgent(Agent):
 
     async def _on_env(self, case: Case, kv: dict[str, str]) -> None:
         if kv.get("refused") == "1":
-            await self._fail(case, f"@{self.customer_human} declined to share the environment. Nothing was shared.")
+            await self._fail(case, f"@{self._customer(case.room_id)[0]} declined to share the environment. "
+                                   "Nothing was shared.")
             return
         vendor = case.vendor_env or self.vendor_env
         customer = Env(**{k: kv.get(k, getattr(vendor, k)) for k in ENV_KEYS})
         case.customer_env = customer
         self._advance(case, Step.ENV_RECEIVED)
+        if self.known_on and await self._answer_known(case, customer):
+            return
         await self.say(case.room_id, case.thread_id, card.lineup(case.id, vendor, customer))
         self._advance(case, Step.BISECTING)
         await self._hop_out(case, Step.BISECTING, config.AGENT_RUNNER,
@@ -189,7 +218,7 @@ class TriageAgent(Agent):
                            f"Culprit `{key}` can't be flipped on the customer machine; stopping before confirm.")
             return
         self._advance(case, Step.CONFIRM_REQUESTED)
-        await self._hop_out(case, Step.CONFIRM_REQUESTED, config.AGENT_CUSTOMER,
+        await self._hop_out(case, Step.CONFIRM_REQUESTED, self._customer(case.room_id)[1],
                             f"Please run the repro on your machine with {key}={getattr(vendor, key)}, then as-is.",
                             key=key, value=getattr(vendor, key))
 
@@ -238,15 +267,37 @@ class TriageAgent(Agent):
             return
         self._advance(case, Step.MATRIX_GREEN)
         self._advance(case, Step.VERIFY_REQUESTED)
-        await self._hop_out(case, Step.VERIFY_REQUESTED, config.AGENT_CUSTOMER,
+        await self._hop_out(case, Step.VERIFY_REQUESTED, self._customer(case.room_id)[1],
                             f"Please install bizclock at {case.fix.sha[:10]} and re-run the original repro.",
                             sha=case.fix.sha)
 
     async def _on_fixed(self, case: Case, kv: dict[str, str]) -> None:
         if kv.get("passed") == "1":
             self._advance(case, Step.FIXED_ON_CUSTOMER)
+            if self.known_on and self._event is not None:
+                rec = known.record_from_case(case, self._event, self._customer(case.room_id)[1])
+                if rec:
+                    self.known.add(rec)
         else:
             await self._fail(case, "The customer's machine did not confirm the fix.")
+
+    async def _answer_known(self, case: Case, customer: Env) -> bool:
+        """Answer from a verified record if one matches. True if answered."""
+        for fix in self.known.match(customer.as_dict()):
+            if (fix.evidence.room_id, fix.evidence.thread_id) == (case.room_id, case.thread_id):
+                continue  # never answer a case from its own record
+            ok, why = await known.evidence_holds(self.client, fix)
+            if not ok:
+                await self.say(case.room_id, case.thread_id,
+                               f"A known fix (case #{fix.case_id}) matches, but its evidence check failed ({why}). "
+                               "Investigating from scratch.")
+                continue
+            matched = known.describe(fix.key, getattr(customer, fix.key))
+            self._advance(case, Step.KNOWN_FIXED)
+            await self.say(case.room_id, case.thread_id,
+                           card.known(case.id, matched, fix.rule, fix.case_id, fix.branch, fix.sha))
+            return True
+        return False
 
     # ------------------------------------------------------------- helpers
 
@@ -313,7 +364,15 @@ def main() -> None:
                 ids[handle] = h["switch_participant_id"]
     except FileNotFoundError:
         pass
-    run_agent(lambda c: TriageAgent(c, human_ids=ids), config.AGENT_TRIAGE)
+    customers: dict[str, tuple[str, str]] = {}
+    try:
+        rooms = creds.load().get("rooms", {})
+        for room_name, (human, agent, _container) in config.CUSTOMERS.items():
+            if room_name in rooms:
+                customers[rooms[room_name]["id"]] = (human, agent)
+    except FileNotFoundError:
+        pass
+    run_agent(lambda c: TriageAgent(c, human_ids=ids, customers=customers), config.AGENT_TRIAGE)
 
 
 if __name__ == "__main__":

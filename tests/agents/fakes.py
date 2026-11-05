@@ -46,6 +46,7 @@ class Posted:
     text: str
     thread_id: str | None
     targets: list[str] = field(default_factory=list)
+    room: str = "room-1"
 
 
 class FakeBus:
@@ -58,6 +59,14 @@ class FakeBus:
         self.statuses: dict[str, str] = {}  # override per target, e.g. {"acme-env": "not_permitted"}
         self._ids = itertools.count(1)
         self.clock = Clock()
+        # room -> agent names in it; an agent not listed anywhere is in the default room only.
+        # Like Switch, an agent only receives messages from rooms it is a member of.
+        self.members: dict[str, set[str]] = {}
+
+    def _in_room(self, name, room):
+        if any(name in m for m in self.members.values()):
+            return name in self.members.get(room, set())
+        return room == self.room
 
     def client(self, name):
         c = FakeClient(self, name)
@@ -70,16 +79,16 @@ class FakeBus:
     def guard(self, name):
         return SendGuard(name, clock=self.clock)
 
-    def _emit(self, sender, kind, text, thread_id, targets=()):
-        p = Posted(f"m{next(self._ids)}", sender, kind, text, thread_id, list(targets))
+    def _emit(self, sender, kind, text, thread_id, targets=(), room=None):
+        p = Posted(f"m{next(self._ids)}", sender, kind, text, thread_id, list(targets), room or self.room)
         self.log.append(p)
         for name in self.handlers:
-            if name != sender:
+            if name != sender and self._in_room(name, p.room):
                 self.queue.append((p, name))
         return p
 
-    def human(self, name, text, thread_id=None, sender_id=None):
-        p = self._emit(name, "human", text, thread_id)
+    def human(self, name, text, thread_id=None, sender_id=None, room=None):
+        p = self._emit(name, "human", text, thread_id, room=room)
         p.sender_id = sender_id or f"u-{name}"
         return p.id
 
@@ -88,7 +97,7 @@ class FakeBus:
         while self.queue:
             p, name = self.queue.pop(0)
             ev = MessageEvent(
-                room_id=self.room, message_id=p.id, thread_id=p.thread_id,
+                room_id=p.room, message_id=p.id, thread_id=p.thread_id,
                 sender_id=getattr(p, "sender_id", f"a-{p.sender}"), sender_name=p.sender,
                 sender_kind=p.kind, text=p.text, addressed=name in p.targets,
             )
@@ -96,8 +105,15 @@ class FakeBus:
             n += 1
             assert n < limit, "message storm"
 
-    def by(self, sender):
-        return [p for p in self.log if p.sender == sender]
+    def by(self, sender, room=None):
+        return [p for p in self.log if p.sender == sender and (room is None or p.room == room)]
+
+    def history(self, room, thread_id):
+        """What read_context would return for a thread: root + replies, as events."""
+        return [MessageEvent(room_id=p.room, message_id=p.id, thread_id=p.thread_id,
+                             sender_id=getattr(p, "sender_id", f"a-{p.sender}"), sender_name=p.sender,
+                             sender_kind=p.kind, text=p.text, addressed=False)
+                for p in self.log if p.room == room and thread_id in (p.id, p.thread_id)]
 
     def texts(self):
         return "\n".join(p.text for p in self.log)
@@ -112,18 +128,18 @@ class FakeClient:
 
     async def post(self, room_id, text, thread_id=None):
         assert_no_agent_mention(self.name, text)
-        return self.bus._emit(self.name, "agent", text, thread_id).id
+        return self.bus._emit(self.name, "agent", text, thread_id, room=room_id).id
 
     async def send_targeted(self, room_id, targets, text, thread_id=None):
         assert_no_agent_mention(self.name, text)
-        self.bus._emit(self.name, "agent", text, thread_id, targets)
+        self.bus._emit(self.name, "agent", text, thread_id, targets, room=room_id)
         return {t: self.bus.statuses.get(t, "live") for t in targets}
 
     async def participants(self, room_id):
         return [Participant(id=f"a-{n}", name=n, kind="agent") for n in self.bus.clients]
 
     async def thread(self, room_id, thread_id):
-        return []
+        return self.bus.history(room_id, thread_id)
 
 
 # ---------------------------------------------------------------- engines
@@ -199,3 +215,16 @@ class FakeFixer:
             raise RuntimeError("fake claude failure")
         return FixResult(f"fix/case-{case_id}", FIX_SHA, ["src/index.js", "test/cutoff-tz.test.js"],
                          "Friday 17:10 is before the cutoff in Asia/Kolkata", self.mode, "Use exact local time.")
+
+
+def report_case():
+    """A Case like #1 at FIXED: culprit tz, fix at FIX_SHA (for known-record tests)."""
+    from woym.contracts import Case
+    from woym.config import VENDOR_ENV
+    m = FakeMachine()
+    sb = FakeSandbox()
+    c = Case(id=1, room_id="room-1", thread_id="root", reporter="meera")
+    c.vendor_env, c.customer_env = VENDOR_ENV, m.env
+    c.bisect = sb.bisect(VENDOR_ENV, m.env)
+    c.fix = FakeFixer().fix(1, "tz", None)
+    return c
