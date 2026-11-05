@@ -282,3 +282,48 @@ def test_live_lock(tmp_path):
     assert lock.read_text() == str(os.getpid())
     demo.release_live_lock(lock)
     assert not lock.exists()
+
+
+# --- B13: image preflight, dead agents ----------------------------------------
+
+
+def test_sandbox_images_come_from_pull_script():
+    imgs = demo.sandbox_images()
+    assert "node:22-alpine" in imgs and "node:20-bookworm-slim" in imgs
+    assert all(":" in i and " " not in i for i in imgs)
+
+
+def test_sandbox_images_parsing(tmp_path):
+    f = tmp_path / "pull.sh"
+    f.write_text("x\nIMAGES=(\n  node:1-alpine   # c\n  ghcr.io/a/b:2.0\n)\nfor i in x; do :; done\n")
+    assert demo.sandbox_images(f) == ["node:1-alpine", "ghcr.io/a/b:2.0"]
+    f.write_text("nothing here")
+    assert demo.sandbox_images(f) == []
+
+
+def test_agent_dying_after_ready_is_caught(tmp_path):
+    code = "import time; print('x connected: rooms=[r]', flush=True); time.sleep(2); print('taken_over'); raise SystemExit(5)"
+    procs = demo.AgentProcs({"runner_agent": _agent(code)}, logs=tmp_path / "l", run_dir=tmp_path / "r")
+    procs.start(timeout_s=10, settle_s=0)
+    procs.check_alive()  # still alive right after ready
+    procs.procs["runner_agent"].wait(timeout=10)
+    with pytest.raises(demo.DemoFailed, match="agent runner_agent exited \\(code 5\\)") as e:
+        procs.check_alive()
+    assert e.value.code == 3 and "taken_over" in str(e.value)
+    procs.stop()
+
+
+def test_run_case_stops_fast_when_check_fails(tmp_path):
+    store = CaseStore(tmp_path / "cases.json")
+    room = FakeRoom(store, stall_at=S.CONSENT_PENDING)
+    calls = {"n": 0}
+
+    def check():
+        calls["n"] += 1
+        if calls["n"] > 3:
+            raise demo.DemoFailed(3, "agent acme_env exited (code 1) during the run")
+
+    with pytest.raises(demo.DemoFailed, match="acme_env exited") as e:
+        demo.run_case(room, store, "fixed", True, "fixture", demo.Timeline(out=lambda s: None),
+                      poll_s=0.01, open_timeout_s=2, check=check)
+    assert e.value.code == 3

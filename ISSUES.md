@@ -351,3 +351,22 @@ EOF
 - **Evidence:** var/logs/fixer_agent.log: "claude -p took 30.4s, $0.08" (cost as reported by the CLI's JSON output).
 - **Impact:** Small plan usage. The run was useful: it verified the stricter fixer gate live (PASS, no fallback).
 - **Workaround / next step:** While a proposal is pending, coworkers wait for an explicit "go", and the lead words run instructions explicitly.
+
+## [2026-11-05 19:15 IST] platform (switch-ba) | A9 cold-stack test: down -v → up → setup → status is zero-touch
+- **Status:** fixed (stack part); B's `make demo FIXER=fixture` on the fresh stack is pending
+- **What happened:** the exact judge path:
+  - `./infra/switch/down.sh -v` (both volumes removed) + `rm var/switch/credentials.json`: 2 s;
+  - `make up`: 12 s (images were already pulled; a judge's first pull takes longer);
+  - `make setup`, run immediately: 7 s, exit 0, "done, no manual steps". New bridge f4aab363…, new users and agents, room acme-support. Both human sender ids were found from room joins, so the hello fallback wasn't needed;
+  - `make status`: 1 s, READY for make demo.
+  No human step was needed. `make up` was NOT blocked by the permission checker this time.
+- **Evidence:** this session's command output; credentials.json fingerprint bridge_id f4aab363-819f-450f-9972-899b33f06a4a.
+- **Impact:** a judge can run it with no browser steps.
+- **Workaround / next step:** found one race and fixed it. `make setup` ran while Switch's own seeder container (woym-switch-setup-1) was still up; it worked, but setup now waits up to 120 s for the Mattermost bridge and team instead of failing. `make down` in the Makefile doesn't pass -v; the wipe needs `./infra/switch/down.sh -v`, so the README should say that. `var/cases.json` survives a wipe; demo.py's reset clears it.
+
+## [2026-11-05 19:15 IST] platform (switch-ba) | Caught before running: first fingerprint draft would have wiped a WARM stack
+- **Status:** fixed (never shipped, never ran)
+- **What happened:** my first version of review fix 1 treated credentials.json with no `fingerprint` key as stale whenever it held agents or humans. Every existing credentials file (all made before fingerprints) would have been dropped on the next `make setup`. setup would then have re-registered the agents (rotating keys under running agents), created a NEW `acme-support` room and made it active: the same class of failure as my 18:57 room switch.
+- **Evidence:** caught by reading the diff while checking credentials after the lead's 19:10 accidental setup run. The bad `stale()` returned "no fingerprint" for any non-empty credentials.
+- **Impact:** none, because it never ran.
+- **Workaround / next step:** with no fingerprint, `stale()` now rebuilds one from what the file recorded (room.bridge_id + humans.*.switch_user_id) and compares it with the live stack. Verified with a warm `make setup` before the A9 wipe: all "ok (kept)", fingerprint written, active room unchanged. Lesson: any code that can drop credentials gets a warm-stack run before a cold one.

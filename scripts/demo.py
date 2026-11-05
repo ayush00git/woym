@@ -121,6 +121,14 @@ class AgentProcs:
             time.sleep(0.2)
         time.sleep(settle_s)  # the room claim runs just after the first frame
 
+    def check_alive(self) -> None:
+        """Raise if any agent process has exited since start (e.g. a taken_over
+        refusal), instead of waiting out a step timeout of up to 900 s."""
+        for name, p in self.procs.items():
+            if p.poll() is not None:
+                raise DemoFailed(3, f"agent {name} exited (code {p.returncode}) during the run:\n"
+                                    f"{tail(self.logs / f'{name}.log')}")
+
     def stop(self) -> None:
         for p in self.procs.values():
             if p.poll() is None:
@@ -322,6 +330,22 @@ def run_case(post: Poster, store: CaseStore, until: str, install_consent: bool, 
 # --------------------------------------------------------------------------
 
 
+PULL_SCRIPT = config.ROOT / "scripts" / "pull-images.sh"
+
+
+def sandbox_images(script: Path = PULL_SCRIPT) -> list[str]:
+    """The IMAGES=( ... ) list in scripts/pull-images.sh: one source of truth."""
+    import re
+
+    block = re.search(r"^IMAGES=\((.*?)^\)", script.read_text(), re.S | re.M)
+    return re.findall(r"^\s*([\w./-]+:[\w.-]+)", block.group(1), re.M) if block else []
+
+
+def missing_images(images: list[str]) -> list[str]:
+    return [i for i in images
+            if subprocess.run(["docker", "image", "inspect", i], capture_output=True).returncode != 0]
+
+
 def preflight() -> list[str]:
     import httpx
 
@@ -341,6 +365,11 @@ def preflight() -> list[str]:
             problems.append(f"credentials incomplete (agents missing: {missing}); run `make setup`")
     except FileNotFoundError as e:
         problems.append(str(e))
+    images = sandbox_images()
+    if not images:
+        problems.append(f"no IMAGES list found in {PULL_SCRIPT.relative_to(config.ROOT)}")
+    for img in missing_images(images):
+        problems.append(f"sandbox image {img} not pulled (run `make images`; a cold pull would eat the run timeout)")
     p = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", config.CUSTOMER_CONTAINER],
                        capture_output=True, text=True)
     if p.stdout.strip() != "true":
@@ -444,8 +473,14 @@ def main(argv: list[str] | None = None) -> int:
             raise DemoFailed(3, str(e)) from None
         agents.start()
         say(f"agents connected: {', '.join(AGENTS)} (logs in {config.LOGS.relative_to(config.ROOT)}/)")
+        room_check = check
+
+        def check() -> None:
+            room_check()
+            agents.check_alive()
+
         def post(who: str, text: str, thread: str | None) -> str:
-            check()  # never post into a room the agents aren't in
+            check()  # never post into a room the agents aren't in, or with an agent down
             return humans_poster(who, text, thread)
 
         case_id = run_case(post, CaseStore(), a.until, install_consent, a.fixer, say,

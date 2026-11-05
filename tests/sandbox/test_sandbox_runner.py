@@ -95,3 +95,46 @@ def test_bisect_skips_when_nothing_to_explain(failing):
     run = fake_run(failing)
     rep = runner.bisect(run, VENDOR_ENV, CUSTOMER_ENV)
     assert rep.steps == [] and rep.culprits == [] and len(run.calls) == 2
+
+
+# --- B13: pull missing images outside the run timeout ---------------------------
+
+
+class _P:
+    def __init__(self, rc, out=b"", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def _sandbox(tmp_path):
+    return runner.DockerSandbox(remote_path=tmp_path / "bizclock.git")
+
+
+def test_missing_image_is_pulled_once_before_running(tmp_path, monkeypatch):
+    sb = _sandbox(tmp_path)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd[:3], kw.get("timeout")))
+        if cmd[:3] == ["docker", "image", "inspect"]:
+            return _P(1)
+        if cmd[:2] == ["docker", "pull"]:
+            return _P(0, err="")
+        return _P(0, b"cutoff=Fri 17:30 payout=Fri\n", b"")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    sb.run(VENDOR_ENV)
+    sb.run(VENDOR_ENV)
+    kinds = [c[0][:2] for c in calls]
+    assert kinds.count(["docker", "pull"]) == 1  # cached after the first time
+    assert kinds.index(["docker", "pull"]) < kinds.index(["docker", "run"])
+    pull_timeout = next(t for c, t in calls if c[:2] == ["docker", "pull"])
+    run_timeout = next(t for c, t in calls if c[:2] == ["docker", "run"])
+    assert pull_timeout == runner.PULL_TIMEOUT_S and run_timeout == sb.timeout_s
+
+
+def test_failed_pull_is_a_sandbox_error(tmp_path, monkeypatch):
+    sb = _sandbox(tmp_path)
+    monkeypatch.setattr(runner.subprocess, "run",
+                        lambda cmd, **kw: _P(1, err="manifest unknown") if cmd[1] in ("image", "pull") else _P(0))
+    with pytest.raises(runner.SandboxError, match="can't pull node:22-alpine: manifest unknown"):
+        sb.run(VENDOR_ENV)

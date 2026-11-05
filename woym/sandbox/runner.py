@@ -19,6 +19,7 @@ look like a reproduced bug.
 from __future__ import annotations
 
 import itertools
+import logging
 import re
 import subprocess
 import time
@@ -33,6 +34,9 @@ from woym.sandbox import remote
 EXPECTED = "cutoff=Fri 17:30 payout=Fri"
 REPRO_SCRIPT = "examples/payout.js"
 MAX_BISECT_RUNS = 10  # including the baseline and target runs
+PULL_TIMEOUT_S = 300  # a cold image pull, separate from the run timeout
+
+log = logging.getLogger("woym.sandbox")
 
 _LINE_RE = re.compile(r"^cutoff=.+ payout=[A-Za-z]{3}$")
 _SAFE_VALUE_RE = re.compile(r"^[A-Za-z0-9._/+:-]{1,64}$")
@@ -90,14 +94,35 @@ def docker_command(env: Env, name: str) -> list[str]:
 class DockerSandbox:
     """Implements woym.contracts.Sandbox."""
 
-    def __init__(self, remote_path: Path | None = None, timeout_s: float = config.RUN_TIMEOUT_S):
+    def __init__(self, remote_path: Path | None = None, timeout_s: float = config.RUN_TIMEOUT_S,
+                 pull_timeout_s: float = PULL_TIMEOUT_S):
         self.remote_path = Path(remote_path or config.REMOTE)
         self.timeout_s = timeout_s
+        self.pull_timeout_s = pull_timeout_s
+        self._have_images: set[str] = set()
         remote.init_remote(self.remote_path)
+
+    def ensure_image(self, image: str) -> None:
+        """Pull a missing image BEFORE the timed run, with its own timeout, so a
+        cold pull never counts against the 90 s run timeout or duration_s.
+        `scripts/pull-images.sh` (make images) avoids this wait entirely."""
+        if image in self._have_images:
+            return
+        if subprocess.run(["docker", "image", "inspect", image], capture_output=True, timeout=30).returncode != 0:
+            log.warning("image %s missing: pulling it before the run (run `make images` to pre-pull)", image)
+            try:
+                p = subprocess.run(["docker", "pull", "-q", image], capture_output=True, text=True,
+                                   timeout=self.pull_timeout_s)
+            except subprocess.TimeoutExpired:
+                raise SandboxError(f"pulling {image} took over {self.pull_timeout_s:.0f}s; run `make images`") from None
+            if p.returncode != 0:
+                raise SandboxError(f"can't pull {image}: {p.stderr.strip()[-300:]}")
+        self._have_images.add(image)
 
     def run(self, env: Env, ref: str | None = None) -> RunResult:
         if ref is not None:
             env = env.with_value("bizclock", ref)  # the result records what actually ran
+        self.ensure_image(image_for(env))
         started = time.perf_counter()
         code = remote.archive(env.bizclock, self.remote_path)
         name = f"woym-run-{uuid.uuid4().hex[:12]}"
