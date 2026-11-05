@@ -13,9 +13,11 @@ Built for the **Flip the Switch** hackathon (WeMakeDevs × DevTools Academy × S
 
 A customer reports a bug. The vendor's CI is green, and support replies "can't reproduce". Then come days of "which Node version? which OS? can you send your lockfile?", and the thread often ends with *"Closing: works for me."* The bug is still there.
 
+This is common. Across six projects and 188,319 bug reports, about **17% of bug reports were marked non-reproducible**, and those stayed open about three months longer than the rest (Joorabchi, Mirzaaghaei, Mesbah, *"Works For Me! Characterizing Non-Reproducible Bug Reports"*, MSR 2014, [doi:10.1145/2597073.2597098](https://doi.org/10.1145/2597073.2597098)).
+
 The cause is usually one fact about the customer's machine that nobody thought to ask about. The vendor can't look at that machine, and the customer doesn't know which fact matters.
 
-Our demo bug is real in kind. `bizclock`, a small payouts library, rounds UTC offsets to whole hours, so India's **+05:30 becomes +06:00**. An order placed Friday at 17:10 IST lands after the 17:30 cutoff, and the payout slips to **Monday**. In UTC CI everything passes.
+Our demo bug belongs to a real bug class. `bizclock`, a small payouts library we wrote for the demo, rounds UTC offsets to whole hours, so India's **+05:30 becomes +06:00**. An order placed Friday at 17:10 IST lands after the 17:30 cutoff, and the payout slips to **Monday**. In UTC CI everything passes. date-fns shipped fixes for the same class, offsets with minutes printed as `+5.5:30` ([date-fns#1599](https://github.com/date-fns/date-fns/pull/1599), [date-fns#1890](https://github.com/date-fns/date-fns/pull/1890)). Their symptom was a malformed string rather than a rounded time.
 
 ## What WOYM does
 

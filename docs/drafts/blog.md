@@ -4,7 +4,7 @@ DRAFT for the Best Blog prize. Owner: sandbox (switch-7c). Review: lead.
   demo runs: timelines in the lead's notes). 📖 = read in the 0.31.0 source, not run.
 - [TODO: ...] must be resolved before publishing. Don't publish with any TODO left.
 - Live numbers are from the runs at 18:58, 18:59 (FIXER=fixture) and 19:02 IST (FIXER=claude) on 2026-11-05, on one laptop.
-- "the case stops instead of shipping" (limits section): confirm with agents (C) that a failed gate moves the case to `failed` before publishing.
+- Checked 2026-11-05: the 17% quote is from the paper's abstract (read from the PDF at people.ece.ubc.ca/amesbah/resources/papers/mona-msr14.pdf, page 1); date-fns #1599 and #1890 are merged PRs about +5.5:30 offsets; the gate/fallback behaviour was confirmed by agents (C).
 -->
 
 # "Works on my machine", now proven on yours: building a two-company bug room on Switch
@@ -17,15 +17,15 @@ DRAFT for the Best Blog prize. Owner: sandbox (switch-7c). Review: lead.
 
 Every developer-tools company has a thread like this. A customer reports a bug. Support can't reproduce it. Then come days of "which Node version?", "which OS?", "can you send your lockfile?", and the thread ends with *"Closing: works for me."* The bug is still there.
 
-The cause is usually some fact about the customer's machine that nobody thought to ask about. The vendor can't see the customer's machine, and the customer doesn't know which fact matters.
+This isn't rare. A study of six bug repositories (one proprietary, five open source; 188,319 reports) found that, on average, **17% of all bug reports were marked non-reproducible**, and those stayed open about three months longer than the rest.¹
 
-[TODO: verify before publishing: Joorabchi, Mirzaaghaei, Mesbah, "Works For Me! Characterizing Non-Reproducible Bug Reports", MSR 2014: about 17% of the reports studied were never reproduced. Keep only if checked against the paper.]
+The cause is often some fact about the customer's machine that nobody thought to ask about. The vendor can't see the customer's machine, and the customer doesn't know which fact matters.
 
 We built **WOYM (Works On Your Machine)**. The vendor's agents and the customer's own agent work the case together in one Switch room, and the customer's agent runs the repro **on the customer's machine**, only after the customer says yes in chat.
 
 ## The bug we planted
 
-We wrote a small vendor library, `bizclock`, and planted a bug of a real class: rounding a UTC offset to whole hours. [TODO: link date-fns #1599 and #1890 after checking they match this class.]
+We wrote a small vendor library, `bizclock`, and planted a bug of a real class: treating a UTC offset as if it were a whole number of hours. Popular libraries have shipped this class of bug. date-fns merged two fixes for India's +05:30 being printed as `+5.5:30` ([#1599](https://github.com/date-fns/date-fns/pull/1599), [#1890](https://github.com/date-fns/date-fns/pull/1890)). Ours rounds instead of printing a fraction, so the effect is a wrong time rather than a malformed string.
 
 ```js
 // fixtures/bizclock/src/index.js (the bug)
@@ -221,7 +221,7 @@ Fifteen agent-to-agent hops per run, no errors in the agent logs. ✅
 
 - **Meera's "laptop" is a Docker container on the same host as the vendor's agents.** It isn't isolated from the vendor; anything with the Docker socket could reach it. What the demo proves is the Switch side: ownership, addressing, the refusal, consent and the shared record, plus `@acme-env`'s allow-list of 5 read-only probes. A real deployment runs `@acme-env` on the customer's own hardware.
 - The human lines in the demo are **scripted** (`scripts/humans.py`) and labelled as such.
-- The Claude Code fixer ran end to end in the room once. Model output varies between runs; the same test gate checks every run, and if it fails, the case stops instead of shipping.
+- The Claude Code fixer ran end to end in the room once. Model output varies between runs. Every fix, Claude's or the stored patch's, must pass the same test gate before anything is pushed. If Claude's edit fails the gate, none of it ships: the fixer says so in the thread, logs it, and falls back to the stored reference patch, labelled as replayed. If that fails too, the case stops. (Covered by `tests/agents/test_fixer.py::test_claude_edit_rejected` and `test_flow.py::test_claude_failure_falls_back_to_fixture_loudly`.) Since the live run, the gate also rejects a test that would only fail in the host's time zone, the weakness described above.
 - One bug class, one library. The bisect varies 5 environment keys and won't find a cause outside them.
 
 ## If you're new to Switch: our checklist
@@ -247,3 +247,7 @@ make demo                            # scripted run, end to end
 `scripts/fresh-clone-test.sh` runs the first line from a clean clone; on our machine, with caches warm, it took 29 s, test suite included. ✅ [TODO: live result: timing on a cold machine.]
 
 *Built in [TODO: final hours] by one human and four Claude Code sessions, each owning one part of the repo. Every failure, including the ones above, is in `ISSUES.md`.*
+
+---
+
+¹ Mona Erfani Joorabchi, Mehdi Mirzaaghaei, Ali Mesbah. "Works For Me! Characterizing Non-reproducible Bug Reports." *Proceedings of the 11th Working Conference on Mining Software Repositories (MSR 2014)*, pp. 62–71. ACM. [doi:10.1145/2597073.2597098](https://doi.org/10.1145/2597073.2597098). From the abstract: "on average, non-reproducible bug reports pertain to 17% of all bug reports, remain active three months longer than their counterparts". Note that 66% of the non-reproducible reports later marked *Fixed* were in fact reproduced and fixed, so "17% are never fixed" would overstate it.

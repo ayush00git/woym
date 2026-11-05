@@ -270,3 +270,10 @@ EOF
 - **Evidence:** media/raw/take-900-frames/0010s.jpg
 - **Impact:** test noise on screen in the video.
 - **Workaround / next step:** options: a dedicated "camera" MM user who is only in the recording room (cleanest), or archiving kt-*/woym-selftest. Both are writes to the shared Mattermost, so I'll wait for the lead's OK and a slot outside a live run.
+
+## [2026-11-05 19:09 IST] lead | Pitch overstated the MSR 2014 statistic ("never reproduced")
+- **Status:** fixed
+- **What happened:** The ideation notes (.hack/decision.md) and an early pitch said "about 17% of bug reports are never reproduced". Sandbox checked the paper itself: it says 17% are *marked* non-reproducible, and that 66% of non-reproducible reports later marked Fixed were in fact reproduced and fixed. "Never" overstates it.
+- **Evidence:** Joorabchi, Mirzaaghaei, Mesbah, MSR 2014, abstract on page 1: people.ece.ubc.ca/amesbah/resources/papers/mona-msr14.pdf; doi:10.1145/2597073.2597098. The URL in the ideation notes returns 404.
+- **Impact:** It would have been a factual error in the README, the video and the pitch.
+- **Workaround / next step:** All public text now says "about 17% of bug reports are marked non-reproducible and stay open about three months longer". The date-fns references are labelled as merged PRs (#1599, #1890) of the same bug class but a different symptom.
