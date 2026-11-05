@@ -82,6 +82,25 @@ class CDP:
         self.handlers.setdefault(method, []).append(fn)
 
 
+def encode(captured: list[tuple[float, Path]], end: float, out: Path) -> None:
+    """Exact-timing encode: each captured frame lasts until the next one arrived (concat demuxer)."""
+    lst = out.with_suffix(".frames.txt")
+    rows = []
+    for i, (t, fp) in enumerate(captured):
+        nxt = captured[i + 1][0] if i + 1 < len(captured) else end
+        rows.append(f"file '{fp.as_posix()}'\nduration {max(0.001, nxt - t):.4f}\n")
+    rows.append(f"file '{captured[-1][1].as_posix()}'\n")  # concat demuxer needs the last file repeated
+    lst.write_text("".join(rows))
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+                        "-i", str(lst), "-vf", f"fps={FPS},scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                        f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,format=yuv420p", "-t", f"{end:.3f}",
+                        "-c:v", "libvpx", "-b:v", "6M", "-deadline", "good", "-cpu-used", "4", str(out)],
+                       capture_output=True, text=True)
+    lst.unlink(missing_ok=True)
+    if r.returncode != 0:
+        raise SystemExit(f"encode failed: {r.stderr[-800:]}")
+
+
 def next_take(prefix: str = "take") -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     pat = re.compile(rf"{re.escape(prefix)}-(\d+)\.webm")
@@ -213,7 +232,6 @@ async def record(args: argparse.Namespace) -> int:
     stills.mkdir(parents=True, exist_ok=True)
     tok, uid, team, chan = mm_session(args.viewer, args.room)
     proc, wsurl, prof = await launch_chrome(args.headed, args.zoom)
-    ff = None
     demo = None
     try:
         async with websockets.connect(wsurl, max_size=64 * 2**20) as ws:
@@ -236,10 +254,19 @@ async def record(args: argparse.Namespace) -> int:
             log(f"opened {url} as {args.viewer}")
 
             latest = {"jpg": None, "n": 0}
+            # Frames are saved with their arrival time and encoded AFTER the run, so a busy CPU can
+            # never squeeze the timeline (a live encode fell to ~16 fps under load: take-epi-1).
+            frames_dir = Path(tempfile.mkdtemp(prefix="woym-frames-"))
+            captured: list[tuple[float, Path]] = []
+            clock = {"t0": None}
 
             async def on_frame(p):
                 latest["jpg"] = base64.b64decode(p["data"])
                 latest["n"] += 1
+                if clock["t0"] is not None:
+                    fp = frames_dir / f"{len(captured):06d}.jpg"
+                    fp.write_bytes(latest["jpg"])
+                    captured.append((time.monotonic() - clock["t0"], fp))
                 try:
                     await cdp.send("Page.screencastFrameAck", sessionId=p["sessionId"])
                 except Exception:
@@ -251,29 +278,19 @@ async def record(args: argparse.Namespace) -> int:
                 if latest["jpg"]:
                     break
                 await asyncio.sleep(0.1)
-            ff = subprocess.Popen(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe", "-framerate", str(FPS),
-                 "-c:v", "mjpeg", "-i", "-", "-vf", f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2", "-c:v", "libvpx", "-b:v", "4M", "-deadline", "realtime",
-                 "-cpu-used", "8", str(out)], stdin=subprocess.PIPE)
             log(f"recording -> {out}")
 
             stop = asyncio.Event()
 
             async def writer():
-                frame_t = 1 / FPS
-                t0 = time.monotonic()
-                k = 0
+                # periodic still of the current frame, for quick checks; the video is encoded later
                 next_still = 0.0
                 while not stop.is_set():
-                    if latest["jpg"]:
-                        ff.stdin.write(latest["jpg"])
-                        el = k * frame_t
-                        if el >= next_still:
-                            (stills / f"{int(el):04d}s.jpg").write_bytes(latest["jpg"])
-                            next_still += 10
-                    k += 1
-                    await asyncio.sleep(max(0.0, t0 + k * frame_t - time.monotonic()))
+                    el = time.monotonic() - clock["t0"]
+                    if latest["jpg"] and el >= next_still:
+                        (stills / f"{int(next_still):04d}s.jpg").write_bytes(latest["jpg"])
+                        next_still += 10
+                    await asyncio.sleep(0.2)
 
             async def keep_bottom():
                 while not stop.is_set():
@@ -297,20 +314,28 @@ async def record(args: argparse.Namespace) -> int:
                     except Exception:
                         root = None
                     if root and root != seen_root:
-                        await asyncio.sleep(1.0)  # let the root render in the channel first
-                        r = await cdp.send("Runtime.evaluate", returnByValue=True,
-                                           expression=OPEN_RHS_JS % {"id": root, "expand": json.dumps(args.frame == "expanded")})
-                        state = r.get("result", {}).get("value")
-                        if state == "open":
-                            seen_root = root
-                            log(f"thread {root} open in the right panel ({args.frame})")
+                        # click, expand and confirm in quick steps: a short case can finish within seconds
+                        for _ in range(40):
+                            r = await cdp.send("Runtime.evaluate", returnByValue=True,
+                                               expression=OPEN_RHS_JS % {"id": root, "expand": json.dumps(args.frame == "expanded")})
+                            state = r.get("result", {}).get("value")
+                            if state == "open":
+                                seen_root = root
+                                log(f"thread {root} open in the right panel ({args.frame}) "
+                                    f"at video {time.monotonic() - clock['t0']:.1f}s")
+                                break
+                            await asyncio.sleep(0.25)
                         else:
-                            log(f"thread {root}: {state}, retrying")
-                    await asyncio.sleep(1)
+                            log(f"thread {root}: still '{state}' after 10 s")
+                    await asyncio.sleep(0.5)
 
+            started = time.monotonic()
+            clock["t0"] = started
+            first = frames_dir / "start.jpg"
+            first.write_bytes(latest["jpg"])
+            captured.append((0.0, first))
             tasks = [asyncio.create_task(writer()), asyncio.create_task(keep_bottom()),
                      asyncio.create_task(follow_thread())]
-            started = time.monotonic()
             if args.attach:
                 try:
                     await asyncio.sleep(args.seconds)
@@ -347,16 +372,20 @@ async def record(args: argparse.Namespace) -> int:
                 log(f"demo.py exited {rc}; recording {args.tail}s more")
                 await asyncio.sleep(args.tail)
             stop.set()
+            end = time.monotonic() - started
             await asyncio.gather(*tasks, return_exceptions=True)
-            log(f"{time.monotonic() - started:.0f}s recorded, {latest['n']} screencast frames")
             await cdp.send("Page.stopScreencast")
             cdp.reader.cancel()
+            log(f"{end:.1f}s recorded, {len(captured)} distinct frames; encoding…")
+            encode(captured, end, out)
+            got = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                        str(out)], capture_output=True, text=True).stdout or 0)
+            log(f"wrote {out} ({out.stat().st_size // 1024} KiB, {got:.2f}s for {end:.2f}s of wall time)")
+            if abs(got - end) > 0.5:
+                log(f"WARNING: video length differs from wall time by {got - end:+.2f}s")
         return rc
     finally:
-        if ff:
-            ff.stdin.close()
-            ff.wait(timeout=60)
-            log(f"wrote {out} ({out.stat().st_size // 1024} KiB)" if out.exists() else "ffmpeg wrote nothing")
+        shutil.rmtree(frames_dir, ignore_errors=True) if "frames_dir" in locals() else None
         if demo and demo.returncode is None:
             demo.terminate()
         proc.terminate()

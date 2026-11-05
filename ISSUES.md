@@ -500,3 +500,10 @@ EOF
 - **Evidence:** C12 audit message; woym/fixer/workspace.py:run_tests; scripts/reset.sh; woym/agents/acme_env.py (ask_before_install, customer_id).
 - **Impact:** The README would have overstated security properties to judges.
 - **Workaround / next step:** Every finding is corrected in README and NOTICE. The video narration and blog must use the same corrected wording; sandbox and platform have been told.
+
+## [2026-11-05 19:47 IST] platform (switch-ba) | Recorder squeezed time under CPU load (take-epi-1: 38.9 s video for 61 s); fixed by encoding after capture
+- **Status:** fixed
+- **What happened:** record.py piped frames into a live VP8 encode at 25 fps through a blocking pipe. While the machine was at load ~12 on 12 cores (other sessions' tests and containers), ffmpeg managed ~16 fps. The writer blocked and the video came out shorter than real time: take-epi-1 was 38.92 s of video for 61 s of wall time (≈1.57x fast). The timeline's [video] stamps (wall time) no longer matched the file.
+- **Evidence:** ffprobe take-epi-1.webm 38.92 s, 973 frames; `uptime` load 12.43. Earlier takes: take-905 72.24 s for 73 s (≈1% short; B frame-checked its cues ±0.5 s, so its use in the cut stands); take-904 26.6 s for 28 s (≈5% short; not used in the cut).
+- **Impact:** take-epi-1 discarded (deleted). Any "real speed" claim for a take depends on this, which is why I checked take-905.
+- **Workaround / next step:** record.py now saves each screencast frame with its arrival time and encodes AFTER the run with the concat demuxer (each frame lasts until the next arrived), libvpx deadline=good. It prints video length vs wall time and warns above 0.5 s. Verified: test 20.00 s/20.00 s; take-epi-2 51.56 s/51.58 s. The thread panel now opens in quick steps (0.25 s) instead of ~2 s per step.

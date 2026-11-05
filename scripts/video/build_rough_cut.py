@@ -62,17 +62,26 @@ MONO = "/usr/share/fonts/jetbrains-mono-fonts/JetBrainsMono-Regular.otf"
 PANE = (1145, 1020, 770, 56)
 PANE_POS = ((W - PANE[0]) // 2, 30)
 
-# Take beats: (video start, play seconds, speed). Positions from the script's cue sheet.
-TAKE_BEATS = {
-    4: (11.5, 5.8, 1.0),    # report -> NOT REPRODUCED
-    5: (17.3, 2.7, 1.0),    # consent card -> yes -> approved
-    6: (20.0, 7.0, 1.0),    # lineup -> bisect card, culprit tz
-    7: (27.0, 1.5, 1.0),    # confirm -> CONFIRMED ON BOTH MACHINES
-    8: (28.5, 1.1, 1.0),    # dev's direct ask -> Switch refusal
-    9: (29.6, 30.2, 30.2 / 16.0),  # patch it -> Claude working -> fix pushed (SPED UP), 16 s + 4 s diff
-    10: (59.8, 5.7, 1.0),   # matrix 4/4 green
-    11: (65.5, 2.5, 1.0),   # install consent -> FIXED, then freeze
-}
+# Main-take beats IN SCRIPT ORDER (the k-th [MM] beat that isn't the members shot or the epilogue):
+# (video start, play seconds, speed). Positions from the script's cue sheet. Keyed by order, not
+# beat number, so renumbering the script doesn't shuffle footage.
+TAKE_SEQ = [
+    (11.5, 5.8, 1.0),    # report -> NOT REPRODUCED
+    (17.3, 2.7, 1.0),    # consent card -> yes -> approved
+    (20.0, 7.0, 1.0),    # lineup -> bisect card, culprit tz
+    (27.0, 1.5, 1.0),    # confirm -> CONFIRMED ON BOTH MACHINES
+    (28.5, 1.1, 1.0),    # dev's direct ask -> Switch refusal
+    (29.6, 30.2, 30.2 / 16.0),  # patch it -> Claude working -> fix pushed (SPED UP), 16 s + 4 s diff
+    (59.8, 5.7, 1.0),    # matrix 4/4 green
+    (65.5, 2.5, 1.0),    # install consent -> FIXED, then freeze
+]
+SPED_UP_INDEX = 5  # TAKE_SEQ entry that is sped up and gets the diff insert
+
+# Epilogue take (acme-nepal), recorded after 9ee9f00. demo clock 0 = video 2.0 s.
+EPI_TAKE = ROOT / "media" / "raw" / "take-epi-2.webm"
+EPI_DEMO0 = 2.0
+# (video start, play s, then hold s): report+consent live, hold consent, play to KNOWN, hold KNOWN.
+EPI_SEQ = [(34.7, 0.8, 3.0), (35.5, 1.5, 4.7)]
 
 
 def log(m: str) -> None:
@@ -223,16 +232,17 @@ def clock_filter(c0: float, play_out: float, speed: float) -> str:
 
 # ------------------------------------------------------------------ segments
 
-def from_take(n: int, dur: float, clip_out: Path) -> None:
-    start, play, speed = TAKE_BEATS[n]
+def from_take(spec: tuple[float, float, float], dur: float, clip_out: Path,
+              src: Path = TAKE, demo0: float = DEMO0) -> None:
+    start, play, speed = spec
     play_out = play / speed
     hold = max(0.0, dur - play_out)
     cw, ch, cx, cy = PANE
     vf = (f"crop={cw}:{ch}:{cx}:{cy},setpts=(PTS-STARTPTS)/{speed:.5f},fps={FPS},"
           f"tpad=stop_mode=clone:stop_duration={hold + 1:.3f},trim=duration={dur:.3f},"
-          f"pad={W}:{H}:{PANE_POS[0]}:{PANE_POS[1]}:color={BG},{clock_filter(start - DEMO0, play_out, speed)}")
+          f"pad={W}:{H}:{PANE_POS[0]}:{PANE_POS[1]}:color={BG},{clock_filter(start - demo0, play_out, speed)}")
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{play:.3f}",
-         "-i", str(TAKE), "-vf", vf, "-an", *ENC, str(clip_out)])
+         "-i", str(src), "-vf", vf, "-an", *ENC, str(clip_out)])
 
 
 def still(png: Path, dur: float, out: Path) -> None:
@@ -309,12 +319,13 @@ def b_members(b) -> Path:
 
 def b_take(b) -> Path:
     out = WORK / f"b{b['n']}.mp4"
-    if b["n"] != 9:
-        from_take(b["n"], b["dur"], out)
+    k = b["take_index"]
+    if k != SPED_UP_INDEX:
+        from_take(TAKE_SEQ[k], b["dur"], out)
         return out
-    # beat 9: 16 s sped-up take + 4 s diff insert
-    part_a, part_b = WORK / "b9a.mp4", WORK / "b9b.mp4"
-    from_take(9, 16.0, part_a)
+    # the sped-up beat: 16 s of take + a diff insert for the rest
+    part_a, part_b = WORK / f"b{b['n']}a.mp4", WORK / f"b{b['n']}b.mp4"
+    from_take(TAKE_SEQ[k], 16.0, part_a)
     diff = subprocess.run(["git", "--git-dir", str(REMOTE), "diff", "main", FIX_SHA, "--", "src/"],
                           capture_output=True, text=True).stdout
     keep = [ln for ln in diff.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
@@ -326,6 +337,22 @@ border-radius:12px;padding:28px 40px;margin:0">{rows}</pre></div>""",
                     ".add{color:#3fb950}.del{color:#f85149}")
     still(asyncio.run(shot(url, WORK / "b9diff.png")), b["dur"] - 16.0, part_b)
     concat([part_a, part_b], out)
+    return out
+
+
+def b_epilogue(b) -> Path:
+    """Kiran's thread (acme-nepal): play live, freeze on the consent card, play to KNOWN, freeze on it.
+    Freezes only; nothing plays faster than it happened."""
+    parts = []
+    for i, (start, play, hold) in enumerate(EPI_SEQ):
+        part = WORK / f"b{b['n']}-{i}.mp4"
+        from_take((start, play, 1.0), play + hold, part, src=EPI_TAKE, demo0=EPI_DEMO0)
+        parts.append(part)
+    total = sum(p + h for _s, p, h in EPI_SEQ)
+    if abs(total - b["dur"]) > 0.05:
+        raise SystemExit(f"epilogue segments sum to {total}s but the beat is {b['dur']}s; edit EPI_SEQ")
+    out = WORK / f"b{b['n']}.mp4"
+    concat(parts, out)
     return out
 
 
@@ -407,25 +434,48 @@ def b_end(b) -> Path:
     return out
 
 
-BUILDERS = {1: b_cold_open, 2: b_stat_card, 3: b_members, 12: b_trust, 13: b_features, 14: b_terminal, 15: b_end}
+def builder_for(b) -> callable:
+    """Pick the builder from the beat's On-screen tag and content, not its number."""
+    sc = b["screen"]
+    if sc.startswith("[CO]"):
+        return b_cold_open
+    if sc.startswith("[TB]"):
+        return b_trust
+    if sc.startswith("[T]"):
+        return b_terminal
+    if sc.startswith("[CARD]"):
+        if "17%" in sc:
+            return b_stat_card
+        if "feature table" in sc.lower():
+            return b_features
+        if "Works On Your Machine" in sc:
+            return b_end
+    if sc.startswith("[MM]"):
+        if "members panel" in sc.lower():
+            return b_members
+        if "epilogue" in sc.lower():
+            return b_epilogue
+        return b_take
+    raise SystemExit(f"beat {b['n']}: no builder for on-screen {sc[:60]!r}")
 # Lead's decision (2026-11-05): beat 3 caption names the dimmed accounts instead of hiding them.
 CAPTION_OVERRIDE: dict[int, str] = {}  # beat 3's override was dropped once B's script matched the lead's wording
-EXTRA_CAPTION = {
-    14: "replay of the recorded take's real output, sped up",
+EXTRA_CAPTION_BY_BUILDER = {
+    "b_terminal": "replay of the recorded take's real output, sped up",
 }
 
 
 def build_beat(b) -> Path:
     n = b["n"]
-    base = (BUILDERS.get(n) or b_take)(b)
+    base = builder_for(b)(b)
     cap_text = CAPTION_OVERRIDE.get(n, b["caption"])
     if "already in" in cap_text:  # e.g. the MOCK-UP label that the cold open already shows
         cap_text = ""
-    if n in EXTRA_CAPTION:
-        cap_text = f"{cap_text} · {EXTRA_CAPTION[n]}" if cap_text else EXTRA_CAPTION[n]
+    extra = EXTRA_CAPTION_BY_BUILDER.get(builder_for(b).__name__)
+    if extra:
+        cap_text = f"{cap_text} · {extra}" if cap_text else extra
     cap = caption_png(n, cap_text)
     badge = None
-    if n == 9:
+    if b.get("take_index") == SPED_UP_INDEX:
         m = re.search(r"SPED UP · ([^·]+?\))", clean(b["caption"]))
         badge = caption_png(90, "", badge=f"⏩ SPED UP · {m.group(1) if m else 'real time 30 s'}")
     out = WORK / f"beat-{n:02d}.mp4"
@@ -439,6 +489,13 @@ def main() -> int:
     a = ap.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
     beats = parse_script()
+    k = 0
+    for b in beats:
+        if builder_for(b) is b_take:
+            b["take_index"] = k
+            k += 1
+    if k != len(TAKE_SEQ):
+        raise SystemExit(f"script has {k} main-take [MM] beats but TAKE_SEQ has {len(TAKE_SEQ)}")
     total = sum(b["dur"] for b in beats)
     log(f"{len(beats)} beats from {SCRIPT_MD.name}, total {total // 60}:{total % 60:02d}")
     for b in beats:
