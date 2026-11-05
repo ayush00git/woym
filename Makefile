@@ -1,5 +1,5 @@
 # WOYM: one-command entry points. Targets are filled in as components land.
-.PHONY: help sync test up down setup demo reset fresh images customer-up customer-down
+.PHONY: help sync test up down setup status demo reset fresh images customer-up customer-down
 
 help:
 	@echo "make sync      install python deps (uv)"
@@ -7,6 +7,7 @@ help:
 	@echo "make up        start Switch + Mattermost + gateway (infra/switch)"
 	@echo "make down      stop the stack"
 	@echo "make setup     users, keys, room, addressing (scripts/setup.sh)"
+	@echo "make status    preflight: stack, agents, owners, rule, room, latest case"
 	@echo "make demo      run the full case end to end (scripts/demo.py)"
 	@echo "make reset     back to the pre-demo state (scripts/reset.sh)"
 	@echo "make fresh     clone HEAD to a temp dir and run the judge path (scripts/fresh-clone-test.sh)"
@@ -45,3 +46,6 @@ reset:
 
 fresh:
 	./scripts/fresh-clone-test.sh
+
+status:
+	uv run python scripts/status.py
