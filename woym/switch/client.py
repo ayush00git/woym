@@ -39,18 +39,24 @@ class Refused(RuntimeError):
     """The server refused the connection (bad key, not a room member...). Not retried."""
 
 
+# Switch's own voice ("Following the conversation isn't switched on...") arrives
+# from this sender with sender_kind null [live]. Matched exactly, not parsed.
+SYSTEM_SENDER_PREFIX = "@switch-admin:"
+
+
 def _payload_kind(payload: dict[str, Any]) -> str | None:
-    if payload.get("sender_kind") == "platform":
+    if payload.get("sender_kind") == "platform" or (payload.get("sender") or "").startswith(SYSTEM_SENDER_PREFIX):
         return "system"
     return None
 
 
 def to_event(data: dict[str, Any], kinds: dict[str, str]) -> MessageEvent:
     """Map a `message` frame's data to a MessageEvent. `kinds` maps participant
-    id -> "human"|"agent" (from list_participants)."""
+    NAME -> "human"|"agent" (from list_participants, whose ids are UUIDs and do
+    not match the event's `sender` id [live])."""
     p = data.get("payload") or {}
     sender = p.get("sender") or ""
-    kind = _payload_kind(p) or kinds.get(sender) or "human"
+    kind = _payload_kind(p) or kinds.get(p.get("sender_name") or "") or "human"
     return MessageEvent(
         room_id=data.get("room_id") or "",
         message_id=p.get("message_id") or "",
@@ -66,7 +72,7 @@ def to_event(data: dict[str, Any], kinds: dict[str, str]) -> MessageEvent:
 def entry_to_event(room_id: str, thread_root: str, e: dict[str, Any], kinds: dict[str, str]) -> MessageEvent:
     """Map a read_context entry to a MessageEvent."""
     sender = e.get("sender") or ""
-    kind = "system" if e.get("sender_kind") == "platform" else kinds.get(sender, "human")
+    kind = _payload_kind(e) or kinds.get(e.get("sender_name") or "", "human")
     mid = e.get("id") or ""
     return MessageEvent(
         room_id=room_id,
@@ -113,7 +119,6 @@ class WsSwitchClient:
             transport=transport,
         )
         self._kinds: dict[str, str] = {}
-        self._own_ids: set[str] = set()  # our participant id(s)
         self._own_msgs: set[str] = set()  # event ids we posted
         self._connected = asyncio.Event()
         self._connected_room: str | None = None
@@ -186,9 +191,7 @@ class WsSwitchClient:
         out = []
         for r in rows:
             kind = _norm_kind(r.get("type"))
-            self._kinds[r.get("id", "")] = kind
-            if kind == "agent" and r.get("name") == self.name:
-                self._own_ids.add(r.get("id", ""))
+            self._kinds[r.get("name", "")] = kind
             out.append(Participant(id=r.get("id", ""), name=r.get("name", ""), kind=kind))
         return out
 
@@ -283,16 +286,18 @@ class WsSwitchClient:
     async def _on_message(self, data: dict[str, Any], queue: asyncio.Queue[MessageEvent]) -> None:
         p = data.get("payload") or {}
         sender = p.get("sender") or ""
-        if sender and sender not in self._kinds and _payload_kind(p) is None and self._connected.is_set():
+        sname = p.get("sender_name") or ""
+        if sname and sname not in self._kinds and _payload_kind(p) is None and self._connected.is_set():
             # bounded, so a slow server can't hold up pongs past the 6 s TTL
             try:
                 await asyncio.wait_for(self._refresh_kinds(), timeout=2)
             except Exception as e:
                 log.warning("%s participants refresh failed: %s", self.name, e)
-        if sender in self._own_ids or p.get("message_id") in self._own_msgs:
-            return
-        if not self._own_ids and p.get("sender_name") == self.name and self._kinds.get(sender) == "agent":
-            return
+        # Own messages: by posted event id, or by our agent name (agent names are
+        # unique, and Mattermost reserves the bot's username, so a human can't reuse it).
+        if p.get("message_id") in self._own_msgs or sname == self.name:
+            if not sender.startswith("@switch-mattermost-"):
+                return
         await queue.put(to_event(data, self._kinds))
 
     async def _work(self, queue: asyncio.Queue[MessageEvent], handler: Handler) -> None:

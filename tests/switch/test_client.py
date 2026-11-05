@@ -56,9 +56,16 @@ def ops_transport(calls: list):
 
 
 def test_to_event_maps_fields():
-    ev = to_event(msg_frame(5, MEERA, "meera", "yes", thread="r1", addressed=True)["data"], {MEERA: "human"})
+    ev = to_event(msg_frame(5, MEERA, "meera", "yes", thread="r1", addressed=True)["data"], {"meera": "human"})
     assert (ev.room_id, ev.message_id, ev.thread_id, ev.sender_name, ev.sender_kind, ev.text, ev.addressed) == (
         ROOM, "m5", "r1", "meera", "human", "yes", True)
+
+
+def test_switch_admin_voice_is_system():
+    # live: Switch's own notices come from @switch-admin with sender_kind null
+    d = msg_frame(1, "@switch-admin:localhost", "admin", "Following the conversation isn't switched on")["data"]
+    d["payload"]["sender_kind"] = None
+    assert to_event(d, {}).sender_kind == "system"
 
 
 def test_platform_sender_is_system():
@@ -69,7 +76,7 @@ def test_platform_sender_is_system():
 
 def test_entry_to_event_thread_root():
     root = entry_to_event(ROOM, "r1", {"id": "r1", "sender": MEERA, "body": "a"}, {})
-    reply = entry_to_event(ROOM, "r1", {"id": "r2", "sender": ACME, "body": "b"}, {ACME: "agent"})
+    reply = entry_to_event(ROOM, "r1", {"id": "r2", "sender": ACME, "sender_name": "acme-env", "body": "b"}, {"acme-env": "agent"})
     assert root.thread_id is None and reply.thread_id == "r1" and reply.sender_kind == "agent"
 
 
@@ -118,3 +125,36 @@ async def test_run_pongs_skips_self_and_maps_events():
     assert ("send_targeted_message", {"body": "go", "target_names": ["acme-env"], "thread_id": "m8"}, c.connection_id) in calls
     assert calls[0][0] == "connect_to_room"
     assert [e.message_id for e in th] == ["r1", "r2"] and th[1].thread_id == "r1"
+
+
+async def test_fakeswitch_roundtrip():
+    from tests.switch.fakeswitch import FakeSwitch
+
+    async with FakeSwitch(not_permitted={"acme-env": {"runner"}}) as sw:
+        tri, acme, run = sw.client("triage"), sw.client("acme-env"), sw.client("runner")
+        seen: dict[str, list] = {"triage": [], "acme-env": []}
+
+        async def mk(n):
+            async def h(ev):
+                seen[n].append(ev)
+            return h
+
+        tasks = [asyncio.create_task(tri.run(await mk("triage"))), asyncio.create_task(acme.run(await mk("acme-env"))),
+                 asyncio.create_task(run.run(await mk("triage")))]
+        await sw.wait_connected("triage", "acme-env", "runner")
+        await asyncio.sleep(0.3)
+        root = await sw.human_post("meera", "@triage it breaks")
+        await asyncio.sleep(0.2)
+        st = await tri.send_targeted(tri.room_id, ["acme-env"], "env please", thread_id=root)
+        st2 = await run.send_targeted(run.room_id, ["acme-env"], "sneaky")
+        await sw.human_post("meera", "yes", thread_id=root)
+        await asyncio.sleep(0.3)
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert st == {"acme-env": "live"} and st2 == {"acme-env": "not_permitted"}
+    a = {e.text: e for e in seen["acme-env"]}
+    assert a["@acme-env env please"].addressed and a["@acme-env env please"].thread_id == root
+    assert not a["@acme-env sneaky"].addressed
+    assert a["yes"].thread_id == root and a["yes"].sender_kind == "human"

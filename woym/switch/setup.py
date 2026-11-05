@@ -185,11 +185,33 @@ async def main() -> int:
     say("acme-env addressing: meera + meera's agents + triage (set by meera)")
 
     # Follow-ups off
-    if room.get("channel_id"):
+    if room.get("channel_id") and not room.get("followups_off"):
         r = await httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=30, headers={
             "Authorization": f"Bearer {data['humans'][DEV]['mm_token']}"}).post(
             "/posts", json={"channel_id": room["channel_id"], "message": "!follow-ups off"})
         say(f"posted '!follow-ups off' as dev -> {r.status_code}")
+        room["followups_off"] = r.status_code == 201
+    creds.save(data)
+
+    # Human participant ids: the exact `sender` on message events, e.g.
+    # "@switch-mattermost-<bridge>-meera:localhost" [live]. Read from room history
+    # (joins and messages), never built from parts. Agents check senders by this id.
+    await asyncio.sleep(2)
+    tri = data["agents"][config.AGENT_TRIAGE]
+    async with httpx.AsyncClient(base_url=SWITCH, timeout=30, headers={"Authorization": f"Bearer {tri['api_key']}"}) as c:
+        ctx = check(await c.post(f"/agents/{tri['id']}/ops/read_context", json={"limit": 200, "room_id": room["id"]}), "read_context")
+    entries = []
+    for t in (ctx or {}).get("result", {}).get("threads", []):
+        entries += [t.get("root") or {}] + list(t.get("replies") or [])
+    for h in (DEV, MEERA):
+        ids = {e.get("sender") for e in entries
+               if e.get("sender_name") == h and (e.get("sender") or "").startswith("@switch-mattermost-")}
+        if len(ids) == 1:
+            data["humans"][h]["switch_participant_id"] = ids.pop()
+            say(f"{h} participant id {data['humans'][h]['switch_participant_id']}")
+        else:
+            MANUAL.append(f"no unique participant id for {h} in room history (found {ids}); "
+                          f"post one message as {h} and re-run setup")
     creds.save(data)
 
     say(f"credentials -> {creds.CREDS_FILE}")

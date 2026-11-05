@@ -6,7 +6,37 @@ How WOYM talks to Switch 0.31.0. Owned by platform. Every claim has a tag:
 - **[live]** confirmed against the local stack by `scripts/killtest/killtest.py` (evidence in `var/killtest/`);
 - **[assumed]** neither.
 
-Status: the kill test has **not run yet** (the stack start is waiting on the user's approval). Everything below is [src] until this line changes.
+Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** `scripts/setup.sh` and a live client smoke test also ran clean. Raw evidence: `var/killtest/results.json`, `events.jsonl`, `ops.json`, `read_context.json`. Section 0 summarises what was confirmed; the [src] tags further down were written before the run, and section 0 wins where they disagree.
+
+## 0. Kill test results [live]
+
+| # | Question | Result |
+|---|---|---|
+| 1 | Gateway users + per-owner registration keys by API | ✅ `POST /gateway/users`, `POST /gateway/api-keys`. No browser |
+| 2 | Probe agent per owner: register, WS connect, survive pings | ✅ `POST /agents` (custom). Ping every 2 s, pong with cursor, 14 s with no eviction. 53 ops |
+| 3 | Cross-owner `send_targeted` | ✅ default policy → `not_permitted` (the message still posts, `addressed:false`, and the target auto-replies "You're not permitted to direct messages to me…"). After Meera's rule `{agents:[<kt-dev uuid>]}` → `live`, `addressed:true`. Dev changing Meera's agent's policy → 403. Reverse direction (meera's agent → dev's agent) → `not_permitted` |
+| 3b | Agent changes its own addressing | ✅ refused: `update_agent_detail(self, addressing=anyone)` → 403 |
+| 4 | Cross-owner agent into the room | ✅ `invite_agent_to_room` by dev's agent → 200 even under Meera's default policy. In setup, Meera's own `POST /gateway/rooms/{id}/agents` → 200 |
+| 5 | Human thread reply reaches the agent | ✅ delivered (filter=all) with `addressed:false`, `thread_id` = the root's **Switch** id (`sw_…`), `sender` = `@switch-mattermost-<bridge>-meera:localhost`, `sender_name` = `meera` |
+| 5b | `!follow-ups off` | Already off: Switch answered "Following the conversation isn't switched on for this Switch server". Harmless |
+| 6 | Agent edits its own message | ❌ no op (only `edit_role`). Re-post cards |
+| 7 | MM users dev/meera with PATs | ✅ after `PUT /api/v4/config/patch` EnableUserAccessTokens + role `system_user_access_token` |
+| 8 | Link MM account → Switch user by API | ✅ `POST /gateway/collaborations/{bridge}/identities` → 200. Afterwards `owner:true` matches Meera's messages (`addressed:true`); before linking it did not |
+| 9 | Agent reply into a human thread | ✅ `post_message(thread_id=sw_…)` lands under the Mattermost root post |
+
+### Surprises that matter for C and B
+- **`@name` inside `post_message` DOES address** (`addressed:true` at the target). The brief said it addresses nobody. Keep using `send_targeted` (it returns statuses), and don't put `@agent` in prose you `post()` unless you mean it.
+- **Refused addressing produces a visible auto-reply** in the thread from the target agent, posted by Switch on its behalf, e.g. `@dev I only take instructions from my owner, and this chat account isn't…`. On camera, nobody should @mention `@acme-env` unless the rule admits them.
+- Every agent posts **"Hi! Mention @<name> to get my attention."** when it joins a room. setup.sh triggers this once, at room creation.
+- `list_participants` ids are **UUIDs** (agent id / user id), NOT the event `sender` ids. Map kinds by `name`.
+- Message ids and `thread_id`s are Switch ids (`sw_<hex>`), **not** Mattermost post ids. `humans.py` prints the Mattermost post id. Use that only for `humans.py --thread`, never to compare with an agent's `thread_id`.
+- Switch's own notices come from `@switch-admin:localhost` with `sender_kind: null`. The client maps them to `sender_kind="system"`.
+- `targeted` messages arrive with `@target ` prepended to the body.
+- Event `sequence`/`id` values are huge (~9e15). They fit a Python int.
+- Human ids are stable across linking (same `sender` before and after).
+
+### Human participant ids (for sender checks)
+`var/switch/credentials.json` → `humans.<h>.switch_participant_id`, e.g. `@switch-mattermost-8396fa22-…-meera:localhost`. setup.py reads it from room history (exact `sender` where `sender_name == h`), never builds it. It equals `MessageEvent.sender_id` for that human's messages [live, smoke test].
 
 ## 1. Stack
 
@@ -99,7 +129,7 @@ Header: Authorization: Bearer <agent api_key>
                       "message_id": "<id>", "body": "text", "timestamp": 1762350000000,
                       "thread_id": "<root id or null>", "attachments": []}}}
 ```
-- `sender_kind` is present only when the Switch platform posted it; otherwise it's **absent**. Agent vs human is NOT on the event [src]; it comes from `list_participants` (`type`).
+- `sender_kind` is `null` unless the Switch platform posted it [live]. Agent vs human is NOT on the event; it comes from `list_participants` (`type`), matched by **name**. Extra live keys: `opening_message`, `sender_role` (null), and `missed` on the data object.
 - `on_behalf_of` is absent unless a platform message speaks for a person.
 - Treat `sender` ids as opaque.
 - Mapping to `contracts.MessageEvent`:
@@ -114,7 +144,7 @@ Header: Authorization: Bearer <agent api_key>
 | op | args | result |
 |---|---|---|
 | `connect_to_room` | `room_id, include_general_instructions=true` | room context + participants; takes over the claim |
-| `post_message` | `body, thread_id=None` | `{"event_id"}`; `@name` in the body addresses nobody (per docstring) |
+| `post_message` | `body, thread_id=None` | `{"event_id"}`; **`@name` in the body DOES address [live]** |
 | `send_targeted_message` | `body, target_names=[...], target_roles=None, thread_id=None` | `{"event_id", "target_statuses": {name: "live"/"awaiting_manual_poll"/"no_session"/"disconnected"/"not_permitted"}}`; user targets are omitted; `not_permitted` **still posts** and the target answers in the room that it can't act |
 | `read_context` | `limit=50, since=None, before=None, room_id=None` | `{"threads":[{"root":E,"replies":[E...]}], "truncated", "oldest_timestamp"}`, where E = `{id, kind, sender, sender_name, body, timestamp, attachments, sender_kind?}` |
 | `list_participants` | none (connected room) | `[{id, name, type, status, alias}]` |

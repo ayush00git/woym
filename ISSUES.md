@@ -148,3 +148,43 @@ EOF
 - **Evidence:** headless Chrome screenshots (`google-chrome --headless=new --window-size=W,H --screenshot`).
 - **Impact:** none remaining.
 - **Workaround / next step:** Caveat: headless Chrome's virtual time doesn't advance CSS transitions, so I could only check the static final frame and the first 3.5 s by screenshot. Watch the full animated run once in a real browser before recording.
+
+## [2026-11-05 18:53 IST] platform (switch-ba) | Kill test A2: GO. Cross-owner addressing is Switch-enforced
+- **Status:** fixed (resolves the lead's 18:30 risks 1–4; also the 19:20 "stack blocked" entry: the user started the stack)
+- **What happened:** `uv run python scripts/killtest/killtest.py` against live 0.31.0:
+  - cross-owner send_targeted → `not_permitted` under the default policy, then `live` + addressed after Meera's rule `{agents:[<uuid>]}`;
+  - dev changing Meera's agent's policy → 403, and an agent changing its own addressing → 403;
+  - identity link by API works, after which `owner:true` matches Meera;
+  - thread replies keep the root's thread_id (a Switch `sw_…` id).
+  Then `scripts/setup.sh` ran clean twice (idempotent, no manual steps), and a live smoke test of WsSwitchClient + humans.py passed.
+- **Evidence:** var/killtest/results.json; docs/switch-notes.md §0
+- **Impact:** the "Switch-enforced" pitch holds; no fallback needed.
+- **Workaround / next step:** none.
+
+## [2026-11-05 18:53 IST] platform (switch-ba) | Brief was wrong: @name inside post_message DOES address
+- **Status:** open (for agents to note)
+- **What happened:** `post_message("@kt-meera …")` arrived at kt-meera with `addressed: true`.
+- **Evidence:** var/killtest/results.json S6.post_with_at_name
+- **Impact:** an agent prose line containing "@acme-env" addresses acme-env, and if it isn't permitted, acme-env's auto-reply refusal appears in chat.
+- **Workaround / next step:** use send_targeted for hops; avoid @agent in post() prose.
+
+## [2026-11-05 18:53 IST] platform (switch-ba) | Refused addressing posts a visible auto-reply in the room
+- **Status:** open (demo risk)
+- **What happened:** when a non-permitted sender addresses an agent, Switch posts a reply from that agent: "@dev I only take instructions from my owner, and this chat account isn't…" / "@kt-dev You're not permitted to direct messages to me in this room…".
+- **Evidence:** Mattermost channel of room kt-*, var/killtest/events.jsonl
+- **Impact:** on camera, a stray @acme-env from dev shows a refusal. That could be a deliberate demo beat ("Switch enforces Meera's rule") or noise.
+- **Workaround / next step:** lead decides whether to show it on purpose.
+
+## [2026-11-05 18:53 IST] platform (switch-ba) | Kill-test script: two false FAILs (test bugs, not Switch)
+- **Status:** worked-around
+- **What happened:** (1) `connect_to_room` was called before the WS had opened → 409 "connection … is not open". The real client only calls it after `connection_state`. (2) The MM thread check ran before the bridge delivered the post; a later read shows the reply in the thread.
+- **Evidence:** results.json S5.connect_to_room.*, S7.agent_reply_lands_in_mm_thread; MM thread 9t9i8wz3… shows "kt agent reply in thread".
+- **Impact:** none.
+- **Workaround / next step:** the live smoke test covers both paths.
+
+## [2026-11-05 18:53 IST] platform (switch-ba) | list_participants ids != event sender ids; client fixed
+- **Status:** fixed
+- **What happened:** list_participants returns UUIDs; events carry `@switch-agent-…` / `@switch-mattermost-…` ids. The first client mapped kinds by id, so everything would have read as "human".
+- **Evidence:** results.json S5.list_participants vs events.jsonl
+- **Impact:** fixed in woym/switch/client.py (mapped by name); tests updated.
+- **Workaround / next step:** none.
