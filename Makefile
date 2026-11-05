@@ -8,7 +8,7 @@ help:
 	@echo "make down      stop the stack"
 	@echo "make setup     users, keys, room, addressing (scripts/setup.sh)"
 	@echo "make status    preflight: stack, agents, owners, rule, room, latest case"
-	@echo "make demo      run the full case end to end (scripts/demo.py)"
+	@echo "make demo      run the full case end to end (FIXER=claude|fixture, default claude)"
 	@echo "make reset     back to the pre-demo state (scripts/reset.sh)"
 	@echo "make fresh     clone HEAD to a temp dir and run the judge path (scripts/fresh-clone-test.sh)"
 	@echo "make images    pre-pull node images and build the acme-laptop image"
@@ -29,8 +29,10 @@ down:
 setup:
 	./scripts/setup.sh
 
+FIXER ?= claude
+
 demo:
-	uv run python scripts/demo.py
+	uv run python scripts/demo.py --fixer $(FIXER)
 
 images:
 	./scripts/pull-images.sh
