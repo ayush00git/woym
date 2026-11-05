@@ -188,6 +188,7 @@ class Step(str, Enum):
     MATRIX_GREEN = "matrix_green"
     VERIFY_REQUESTED = "verify_req"  # @triage -> @acme-env
     FIXED_ON_CUSTOMER = "fixed"
+    KNOWN_FIXED = "known"  # epilogue (WOYM_KNOWN): matched a verified record, terminal
     FAILED = "failed"
 
 

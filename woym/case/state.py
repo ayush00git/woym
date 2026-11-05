@@ -38,16 +38,18 @@ from woym.contracts import (
 # Transitions (triage's view of the case)
 # --------------------------------------------------------------------------
 
-TERMINAL = frozenset({Step.FIXED_ON_CUSTOMER, Step.FAILED})
+TERMINAL = frozenset({Step.FIXED_ON_CUSTOMER, Step.FAILED, Step.KNOWN_FIXED})
 
 TRANSITIONS: dict[Step, frozenset[Step]] = {
-    Step.REPORTED: frozenset({Step.SANDBOX_RUN}),
+    # REPORTED -> ENV_REQUESTED and ENV_RECEIVED -> KNOWN_FIXED are only taken with
+    # WOYM_KNOWN=1 and a known-fix record (woym/case/known.py).
+    Step.REPORTED: frozenset({Step.SANDBOX_RUN, Step.ENV_REQUESTED}),
     Step.SANDBOX_RUN: frozenset({Step.NOT_REPRODUCED, Step.REPRODUCED}),
     Step.NOT_REPRODUCED: frozenset({Step.ENV_REQUESTED}),
     Step.REPRODUCED: frozenset({Step.FIX_REQUESTED}),
     Step.ENV_REQUESTED: frozenset({Step.CONSENT_PENDING, Step.ENV_RECEIVED}),
     Step.CONSENT_PENDING: frozenset({Step.ENV_RECEIVED}),
-    Step.ENV_RECEIVED: frozenset({Step.BISECTING}),
+    Step.ENV_RECEIVED: frozenset({Step.BISECTING, Step.KNOWN_FIXED}),
     Step.BISECTING: frozenset({Step.CULPRIT_FOUND}),
     Step.CULPRIT_FOUND: frozenset({Step.CONFIRM_REQUESTED}),
     Step.CONFIRM_REQUESTED: frozenset({Step.CONFIRMED_BOTH}),
@@ -57,6 +59,7 @@ TRANSITIONS: dict[Step, frozenset[Step]] = {
     Step.MATRIX_GREEN: frozenset({Step.VERIFY_REQUESTED}),
     Step.VERIFY_REQUESTED: frozenset({Step.FIXED_ON_CUSTOMER}),
     Step.FIXED_ON_CUSTOMER: frozenset(),
+    Step.KNOWN_FIXED: frozenset(),
     Step.FAILED: frozenset(),
 }
 

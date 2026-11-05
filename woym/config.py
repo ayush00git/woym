@@ -48,6 +48,15 @@ AGENT_RUNNER = "runner"
 AGENT_FIXER = "fixer"
 AGENT_CUSTOMER = "acme-env"
 
+# Epilogue (known culprits), off by default. One entry per customer room:
+# room name -> (customer human handle, customer agent name, customer container)
+KNOWN_ENABLED = os.environ.get("WOYM_KNOWN", "0") == "1"
+KNOWN_DB = VAR / "known.json"
+CUSTOMERS = {
+    os.environ.get("WOYM_ROOM", "acme-support"): ("meera", "acme-env", "acme-laptop"),
+    "acme-nepal": ("kiran", "nepal-env", "kiran-laptop"),
+}
+
 # Customer machine (a long-running container owned by the customer side)
 CUSTOMER_CONTAINER = os.environ.get("WOYM_CUSTOMER_CONTAINER", "acme-laptop")
 
