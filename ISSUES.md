@@ -440,3 +440,10 @@ EOF
   6. Beat 12 highlights the three arrows for the first half, then the "Never crosses" row.
 - **Slack:** each beat has ≥ 0.5 s after its narration at 2.3 words/s (tightest: beat 15, 0.5 s; beat 3, 0.7 s). Beat lengths follow the script exactly, so the total stays 3:00.
 - **Evidence:** media/raw/rough-cut.mp4, rough-cut-still-*.jpg, media/raw/cut-work/ (intermediate files).
+
+## [2026-11-05 19:34 IST] platform (switch-ba) | Video beat 3: no splicing. Real members panel, all 9, extra accounts dimmed (lead decision)
+- **Status:** fixed
+- **What happened:** the first rough cut spliced the members panel, removing the admin, camera and user rows and closing the gap. That made a 9-member room look like 6. The lead ruled it edits the evidence, even with a caption.
+- **Evidence:** lead's decision message; scripts/video/build_rough_cut.py b_members().
+- **Impact:** the beat now shows the take's real members panel unaltered ("9 members"). admin, camera and user are dimmed with a 55% dark box, not removed. The side text says "members panel from the recorded take, nothing removed · dimmed: setup and recording accounts". The caption is overridden in the build script: "Owners come from registration keys" + small "admin/user: Switch's setup accounts · camera: the recording account".
+- **Workaround / next step:** B should update the beat 3 caption cell in docs/drafts/video-script.md to match (the build script overrides it until then). Rule for later edits: dim or highlight, never remove.

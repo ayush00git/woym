@@ -287,17 +287,21 @@ They stay open <b>~3 months longer</b>.</div></div>""")
 
 
 def b_members(b) -> Path:
+    """The REAL members panel from the take, unaltered (all 9 members). Setup/recording
+    accounts are dimmed to ~50%, never removed: a 9-member room must not look like 6."""
     frame = WORK / "take-0005.png"
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", "5", "-i", str(TAKE), "-frames:v", "1", str(frame)])
-    bg_url = page_file("b3bg", """<div class=card style="justify-content:flex-start;padding-top:70px;box-sizing:border-box">
-<div style="font-size:54px;font-weight:700">One Switch room, two companies</div>
-<div style="font-size:30px;color:#8b949e;margin-top:12px">#acme-support-take1 · members (cropped from the recorded take)</div></div>""")
+    bg_url = page_file("b3bg", """<div class=card style="align-items:flex-start;padding-left:1010px;box-sizing:border-box;text-align:left">
+<div style="font-size:58px;font-weight:700;line-height:1.15">One Switch room,<br>two companies</div>
+<div style="font-size:30px;color:#8b949e;margin-top:22px;line-height:1.5">#acme-support-take1 · members panel<br>from the recorded take, nothing removed<br>
+<span style="color:#e6edf3">dimmed: setup and recording accounts</span></div></div>""")
     bg = asyncio.run(shot(bg_url, WORK / "b3bg.png"))
     out_png = WORK / "b3.png"
-    # Members panel rows in the take frame: acme-env y 359..415; dev..triage y 477..777 (admin, camera, user cut)
+    # Members panel in the take frame: x 1415..1915, y 60..840. Rows (relative to the crop):
+    # admin y 185..240, camera 360..415, user 720..775 -> dimmed with a 50% dark box.
+    dim = ",".join(f"drawbox=x=0:y={y}:w=500:h=56:color=0x0d1117@0.55:t=fill" for y in (185, 360, 720))
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(bg), "-i", str(frame), "-filter_complex",
-         "[1:v]crop=480:56:1425:359[a];[1:v]crop=480:300:1425:477[b];[a][b]vstack,scale=880:-1[m];"
-         "[0:v][m]overlay=(W-w)/2:200", "-frames:v", "1", str(out_png)])
+         f"[1:v]crop=500:780:1415:60,{dim},scale=550:-1[m];[0:v][m]overlay=380:40", "-frames:v", "1", str(out_png)])
     out = WORK / "b3.mp4"
     still(out_png, b["dur"], out)
     return out
@@ -404,6 +408,10 @@ def b_end(b) -> Path:
 
 
 BUILDERS = {1: b_cold_open, 2: b_stat_card, 3: b_members, 12: b_trust, 13: b_features, 14: b_terminal, 15: b_end}
+# Lead's decision (2026-11-05): beat 3 caption names the dimmed accounts instead of hiding them.
+CAPTION_OVERRIDE = {
+    3: "Owners come from registration keys · (small) admin/user: Switch's setup accounts · camera: the recording account",
+}
 EXTRA_CAPTION = {
     14: "replay of the recorded take's real output, sped up",
 }
@@ -412,7 +420,7 @@ EXTRA_CAPTION = {
 def build_beat(b) -> Path:
     n = b["n"]
     base = (BUILDERS.get(n) or b_take)(b)
-    cap_text = b["caption"]
+    cap_text = CAPTION_OVERRIDE.get(n, b["caption"])
     if "already in" in cap_text:  # e.g. the MOCK-UP label that the cold open already shows
         cap_text = ""
     if n in EXTRA_CAPTION:
