@@ -45,7 +45,7 @@ The flow, all in one Mattermost thread:
 
 ### Epilogue: the next customer gets an instant answer (`WOYM_KNOWN=1`)
 
-The next day, Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom in a separate room, through Kiran's own agent `nepal-env`, which belongs to a third owner. `triage` serves both rooms, gets Kiran's consented environment, and matches it against a record written when case #1 was fixed: "UTC offset isn't a whole number of hours".
+Later (in the demo, seconds after case #1 closes), Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom in a separate room, through Kiran's own agent `nepal-env`, which belongs to a third owner. `triage` serves both rooms, gets Kiran's consented environment, and matches it against a record written when case #1 was fixed: "UTC offset isn't a whole number of hours".
 
 It only answers **KNOWN ISSUE · already fixed** after re-reading the evidence from Switch's room history. That evidence is the FIXED message posted by **the customer's own agent**, which Switch attributes to that agent, so no vendor agent or vendor user can forge it. (Whoever runs the Switch server could rewrite its history. In this demo that's one laptop; in a real deployment the server would be run by neither party, or by the customer.) The answer needs no sandbox run and no vendor human, and nothing about Meera crosses into Kiran's room: only the case number, the fix branch and sha, and the rule. Limits: the match rule was written by us from case #1's root cause, not learned. Kiran's room has no fixer, so a case that doesn't match stops at *confirmed on both machines*.
 
