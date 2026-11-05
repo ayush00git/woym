@@ -14,6 +14,7 @@ Writes everything to var/switch/credentials.json. Re-running keeps existing keys
 from __future__ import annotations
 
 import asyncio
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,48 @@ async def gw_login(email: str, password: str) -> httpx.AsyncClient:
     return c
 
 
+def new_password(prefix: str) -> str:
+    """Random, but always satisfies Mattermost's and the Gateway's rules (upper, lower, digit, symbol, 8+)."""
+    return f"{prefix}-{secrets.token_urlsafe(12)}-Aa1!"
+
+
+async def stack_fingerprint(admin: httpx.AsyncClient) -> dict[str, Any]:
+    """What identifies THIS stack's database: the Mattermost bridge id and the Gateway
+    user ids. All cached ids, keys and tokens are only valid for one fingerprint."""
+    # Right after `make up`, Switch's own seeder (the `setup` container) may still be
+    # creating the Mattermost bridge; wait for it instead of failing.
+    bid = None
+    for i in range(60):
+        bridges = check(await admin.get("/collaborations"), "list bridges (admin)")
+        bid = next((b.get("id") or b.get("bridge_id") for b in bridges if b.get("bridge_type") == "mattermost"), None)
+        if bid:
+            break
+        if i == 0:
+            say("waiting for Switch's seeder to create the Mattermost bridge…")
+        await asyncio.sleep(2)
+    if not bid:
+        raise SystemExit("[setup] no Mattermost bridge after 120 s; is the collab profile up? (docker logs woym-switch-setup-1)")
+    users = check(await admin.get("/users"), "list gateway users")
+    by_email = {u["email"]: u["id"] for u in users}
+    return {"bridge_id": bid, "switch_user_ids": {h: by_email.get(f"{h}@woym.local") for h in (DEV, MEERA)}}
+
+
+def stale(data: dict[str, Any], now: dict[str, Any]) -> str | None:
+    old = data.get("fingerprint")
+    if not old:
+        # credentials from before fingerprints: rebuild one from what they recorded
+        old = {"bridge_id": (data.get("room") or {}).get("bridge_id"),
+               "switch_user_ids": {h: hu.get("switch_user_id") for h, hu in (data.get("humans") or {}).items()}}
+        if not old["bridge_id"]:
+            return None
+    if old.get("bridge_id") != now["bridge_id"]:
+        return f"bridge {old.get('bridge_id')} -> {now['bridge_id']}"
+    for h, uid in (old.get("switch_user_ids") or {}).items():
+        if uid and now["switch_user_ids"].get(h) != uid:
+            return f"gateway user {h} {uid} -> {now['switch_user_ids'].get(h)}"
+    return None
+
+
 async def register_agent(reg_key: str, name: str, description: str) -> dict[str, str]:
     async with httpx.AsyncClient(base_url=SWITCH, timeout=30) as c:
         r = await c.post("/agents", headers={"Authorization": f"Bearer {reg_key}"}, json={
@@ -74,6 +117,8 @@ async def register_agent(reg_key: str, name: str, description: str) -> dict[str,
                                     "event_reporting": []},
             "overwrite": True,
         })
+        if r.status_code == 401:
+            raise PermissionError(r.text[:200])
         d = check(r, f"register {name}")
         return {"id": d["id"], "api_key": d["api_key"]}
 
@@ -85,16 +130,22 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
         data = creds.load()
     except FileNotFoundError:
         data = {}
+    admin = await gw_login(env["GATEWAY_ADMIN_EMAIL"], env["GATEWAY_ADMIN_PASSWORD"])
+
+    # A wiped stack (make down -v) invalidates every cached id, key and token.
+    why = stale(data, await stack_fingerprint(admin))
+    if why:
+        say(f"stack changed ({why}): dropping cached agents, keys, tokens, rooms and participant ids")
+        data = {}
     data.setdefault("agents", {})
     data.setdefault("humans", {})
 
     # Gateway users + registration keys
-    admin = await gw_login(env["GATEWAY_ADMIN_EMAIL"], env["GATEWAY_ADMIN_PASSWORD"])
     gw: dict[str, httpx.AsyncClient] = {}
     for h in (DEV, MEERA):
         hu = data["humans"].setdefault(h, {})
         hu.setdefault("email", f"{h}@woym.local")
-        hu.setdefault("switch_password", f"woym-{h}-pass-1")
+        hu.setdefault("switch_password", new_password(h))
         r = await admin.post("/users", json={"name": h, "email": hu["email"], "password": hu["switch_password"], "role": "user"})
         check(r, f"create gateway user {h}", ok=(200, 201, 409))
         gw[h] = await gw_login(hu["email"], hu["switch_password"])
@@ -113,7 +164,13 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
             if r.status_code == 200:
                 say(f"agent {name} ok (kept)")
                 continue
-        a = await register_agent(data["humans"][owner]["reg_key"], name, desc)
+        try:
+            a = await register_agent(data["humans"][owner]["reg_key"], name, desc)
+        except PermissionError:
+            say(f"{owner}'s registration key was rejected; minting a new one")
+            hu = data["humans"][owner]
+            hu["reg_key"] = check(await gw[owner].post("/api-keys", json={"label": f"woym-{owner}"}), f"api key {owner}")["key"]
+            a = await register_agent(hu["reg_key"], name, desc)
         a["owner"] = owner
         data["agents"][name] = a
         say(f"agent {name} registered, owner {owner}")
@@ -125,14 +182,33 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
     check(r, "mattermost admin login")
     mm.headers["Authorization"] = f"Bearer {r.headers['Token']}"
     check(await mm.put("/config/patch", json={"ServiceSettings": {"EnableUserAccessTokens": True}}), "enable PATs")
-    team = check(await mm.get(f"/teams/name/{env['MATTERMOST_TEAM_NAME']}"), "team")
+    for i in range(60):
+        r = await mm.get(f"/teams/name/{env['MATTERMOST_TEAM_NAME']}")
+        if r.status_code == 200:
+            break
+        if i == 0:
+            say("waiting for the Mattermost team…")
+        await asyncio.sleep(2)
+    team = check(r, "team")
     for h in (DEV, MEERA):
         hu = data["humans"][h]
-        r = await mm.post("/users", json={"username": h, "email": hu["email"], "password": f"Woym-{h}-Pass-1!"})
-        uid = r.json()["id"] if r.status_code == 201 else check(await mm.get(f"/users/username/{h}"), f"mm user {h}")["id"]
+        pw = new_password(h.capitalize())
+        r = await mm.post("/users", json={"username": h, "email": hu["email"], "password": pw})
+        if r.status_code == 201:
+            uid = r.json()["id"]
+            hu["mm_password"] = pw
+        else:
+            uid = check(await mm.get(f"/users/username/{h}"), f"mm user {h}")["id"]
+            hu.setdefault("mm_password", f"Woym-{h}-Pass-1!")  # created by an older setup.py
         hu["mm_user_id"] = uid
         await mm.post(f"/teams/{team['id']}/members", json={"team_id": team["id"], "user_id": uid})
         await mm.put(f"/users/{uid}/roles", json={"roles": "system_user system_user_access_token"})
+        if hu.get("mm_token"):
+            ok = await httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=15).get(
+                "/users/me", headers={"Authorization": f"Bearer {hu['mm_token']}"})
+            if ok.status_code != 200:
+                say(f"{h}'s Mattermost token was rejected ({ok.status_code}); minting a new one")
+                hu.pop("mm_token")
         if not hu.get("mm_token"):
             hu["mm_token"] = check(await mm.post(f"/users/{uid}/tokens", json={"description": "woym humans.py"}), f"PAT {h}")["token"]
         say(f"mattermost user {h} ok")
@@ -205,17 +281,28 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
     # "@switch-mattermost-<bridge>-meera:localhost" [live]. Read from room history
     # (joins and messages), never built from parts. Agents check senders by this id.
     await asyncio.sleep(2)
-    tri = data["agents"][config.AGENT_TRIAGE]
-    async with httpx.AsyncClient(base_url=SWITCH, timeout=30, headers={"Authorization": f"Bearer {tri['api_key']}"}) as c:
-        ctx = check(await c.post(f"/agents/{tri['id']}/ops/read_context", json={"limit": 200, "room_id": room["id"]}), "read_context")
-    entries = []
-    for t in (ctx or {}).get("result", {}).get("threads", []):
-        entries += [t.get("root") or {}] + list(t.get("replies") or [])
+    entries = await room_entries(data, room["id"])
+    missing = [h for h in (DEV, MEERA) if not data["humans"][h].get("switch_participant_id")
+               and not _sender_ids(entries, h)]
+    if missing:
+        # Cold stack: a new room may hold no line from a human yet. Each one says
+        # hello once, so Switch has a message carrying their sender id.
+        for h in missing:
+            hello = {DEV: "👋 dev here, vendor support. Agents triage/runner/fixer work for me.",
+                     MEERA: "👋 meera from Acme here. acme-env is my agent."}[h]
+            r = await httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=30, headers={
+                "Authorization": f"Bearer {data['humans'][h]['mm_token']}"}).post(
+                "/posts", json={"channel_id": room["channel_id"], "message": hello})
+            say(f"{h} said hello in the room to reveal their sender id -> {r.status_code}")
+        for _ in range(10):
+            await asyncio.sleep(1.5)
+            entries = await room_entries(data, room["id"])
+            if all(_sender_ids(entries, h) for h in missing):
+                break
     for h in (DEV, MEERA):
         if data["humans"][h].get("switch_participant_id"):
             continue  # same id in every room on this bridge [live]
-        ids = {e.get("sender") for e in entries
-               if e.get("sender_name") == h and (e.get("sender") or "").startswith("@switch-mattermost-")}
+        ids = _sender_ids(entries, h)
         if len(ids) == 1:
             data["humans"][h]["switch_participant_id"] = ids.pop()
             say(f"{h} participant id {data['humans'][h]['switch_participant_id']}")
@@ -224,9 +311,12 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
                           f"post one message as {h} and re-run setup")
     creds.save(data)
 
+    fp = await stack_fingerprint(admin)
+    data["fingerprint"] = fp
     await brand_agents(data, gw, env)
     if new_room:
         await wait_for_greetings(data, room["id"])
+    await ensure_camera(data, env, team["id"])
     creds.save(data)
 
     say(f"credentials -> {creds.CREDS_FILE}")
@@ -237,6 +327,51 @@ async def main(fresh_room: str | None = None, activate: bool = False) -> int:
         return 2
     say("done, no manual steps")
     return 0
+
+
+async def room_entries(data: dict[str, Any], room_id: str) -> list[dict[str, Any]]:
+    tri = data["agents"][config.AGENT_TRIAGE]
+    async with httpx.AsyncClient(base_url=SWITCH, timeout=30, headers={"Authorization": f"Bearer {tri['api_key']}"}) as c:
+        ctx = check(await c.post(f"/agents/{tri['id']}/ops/read_context", json={"limit": 200, "room_id": room_id}), "read_context")
+    out: list[dict[str, Any]] = []
+    for t in (ctx or {}).get("result", {}).get("threads", []):
+        out += [t.get("root") or {}] + list(t.get("replies") or [])
+    return out
+
+
+def _sender_ids(entries: list[dict[str, Any]], h: str) -> set[str]:
+    return {e.get("sender") for e in entries
+            if e.get("sender_name") == h and (e.get("sender") or "").startswith("@switch-mattermost-")}
+
+
+CAMERA = "camera"
+
+
+async def ensure_camera(data: dict[str, Any], env: dict[str, str], team_id: str) -> None:
+    """A read-only Mattermost viewer for scripts/record.py: a member of the ACTIVE
+    room's channel only (default team channels left where Mattermost allows it).
+    It never posts. It is not linked to any Switch user and is in no addressing rule."""
+    mm = httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=30)
+    r = await mm.post("/users/login", json={"login_id": env["MATTERMOST_ADMIN_USER"], "password": env["MATTERMOST_ADMIN_PASSWORD"]})
+    mm.headers["Authorization"] = f"Bearer {r.headers['Token']}"
+    pw = new_password("Camera")
+    r = await mm.post("/users", json={"username": CAMERA, "email": "camera@woym.local", "password": pw,
+                                      "first_name": "camera", "last_name": "(recording)"})
+    if r.status_code == 201:
+        uid = r.json()["id"]
+    else:
+        uid = check(await mm.get(f"/users/username/{CAMERA}"), "camera user")["id"]
+        pw = (data.get("camera") or {}).get("password") or "Woym-camera-Pass-1!"  # older setup.py
+    await mm.post(f"/teams/{team_id}/members", json={"team_id": team_id, "user_id": uid})
+    want = data["room"]["channel_id"]
+    await mm.post(f"/channels/{want}/members", json={"user_id": uid})
+    left = []
+    for ch in (await mm.get(f"/users/{uid}/teams/{team_id}/channels")).json():
+        if ch["id"] != want and ch.get("type") in ("O", "P"):
+            rr = await mm.delete(f"/channels/{ch['id']}/members/{uid}")
+            left.append(f"{ch['name']}:{rr.status_code}")
+    data["camera"] = {"username": CAMERA, "mm_user_id": uid, "password": pw, "channel_id": want}
+    say(f"camera viewer in {data['room']['name']} only (left: {', '.join(left) or 'none'})")
 
 
 LABELS = {

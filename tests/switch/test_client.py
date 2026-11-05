@@ -158,3 +158,12 @@ async def test_fakeswitch_roundtrip():
     assert a["@acme-env env please"].addressed and a["@acme-env env please"].thread_id == root
     assert not a["@acme-env sneaky"].addressed
     assert a["yes"].thread_id == root and a["yes"].sender_kind == "human"
+
+
+async def test_duplicate_message_ids_are_dropped():
+    c = WsSwitchClient("triage", "a", "k", ROOM, base_url="http://127.0.0.1:1")
+    q: asyncio.Queue = asyncio.Queue()
+    f = msg_frame(3, MEERA, "meera", "hi", mid="sw_dup")["data"]
+    await c._on_message(f, q)
+    await c._on_message(f, q)
+    assert q.qsize() == 1

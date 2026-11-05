@@ -14,6 +14,7 @@ so a slow handler (a 90 s sandbox run) never delays pongs.
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import uuid
@@ -120,6 +121,9 @@ class WsSwitchClient:
         )
         self._kinds: dict[str, str] = {}
         self._own_msgs: set[str] = set()  # event ids we posted
+        # start_from=<cursor> is EXCLUSIVE on reconnect [live 2026-11-05], so replays
+        # shouldn't repeat; this is a cheap guard in case a server version differs.
+        self._recent: collections.deque[str] = collections.deque(maxlen=1000)
         self._connected = asyncio.Event()
         self._connected_room: str | None = None
 
@@ -285,6 +289,11 @@ class WsSwitchClient:
 
     async def _on_message(self, data: dict[str, Any], queue: asyncio.Queue[MessageEvent]) -> None:
         p = data.get("payload") or {}
+        mid = p.get("message_id")
+        if mid:
+            if mid in self._recent:
+                return
+            self._recent.append(mid)
         sender = p.get("sender") or ""
         sname = p.get("sender_name") or ""
         if sname and sname not in self._kinds and _payload_kind(p) is None and self._connected.is_set():
