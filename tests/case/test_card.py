@@ -155,3 +155,10 @@ def test_no_card_mentions_an_agent():
     for t in cards:
         assert not re.search(r"@(triage|runner|fixer|acme-env)\b", t), t
         assert not re.search(r"@\w", t.replace("@meera", "")), t   # only the human ping
+
+
+def test_known_card_keeps_acronyms():
+    t = card.known(2, "tz=Asia/Kathmandu (UTC+05:45)", "UTC offset is not a whole number of hours", 1, "fix/case-1", "f604570abc")
+    assert "the UTC offset is not a whole number of hours" in t and "uTC" not in t
+    t2 = card.known(2, "x", "Locale differs", 1, "b", "s")
+    assert "the locale differs" in t2
