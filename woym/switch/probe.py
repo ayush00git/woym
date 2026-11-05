@@ -16,6 +16,7 @@ import json
 import logging
 
 from woym.contracts import MessageEvent
+from woym.switch import creds
 from woym.switch.client import WsSwitchClient
 
 
@@ -28,6 +29,11 @@ async def main() -> None:
     ap.add_argument("--thread")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    # Connecting as an agent takes over its room claim from a running agent.
+    try:
+        creds.require_no_live_run()
+    except creds.LiveRunLocked as e:
+        raise SystemExit(f"probe REFUSED: {e}")
     c = WsSwitchClient.from_credentials(a.agent)
     if a.ops:
         print(json.dumps(sorted(await c.list_ops()), indent=1))
