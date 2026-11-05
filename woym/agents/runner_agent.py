@@ -93,7 +93,11 @@ def _err(e: Exception) -> str:
 def main() -> None:
     from woym.sandbox.runner import DockerSandbox
 
-    run_agent(lambda c: RunnerAgent(c, DockerSandbox()), config.AGENT_RUNNER)
+    from woym.agents.base import side_rooms
+
+    # With WOYM_KNOWN=1 runner also serves the other customer rooms, so a case there
+    # that matches no known fix is bisected for real. Flag off: [] = one room, as before.
+    run_agent(lambda c: RunnerAgent(c, DockerSandbox()), config.AGENT_RUNNER, extra_rooms=side_rooms())
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ class RoomBound(FakeClient):
 
 
 class TwoRooms:
-    def __init__(self, tmp_path, known_on=True, kiran_env=KIRAN_ENV, multiroom=False):
+    def __init__(self, tmp_path, known_on=True, kiran_env=KIRAN_ENV, multiroom=False, fix_rooms=None):
         self.bus = bus = FakeBus(room=R1)
         bus.members = {R1: {"triage", "runner", "fixer", "acme-env"}, R2: {"triage", "runner", "nepal-env"}}
         # (runner in room 2 too: if no known fix matches, Kiran's case is investigated normally)
@@ -56,11 +56,13 @@ class TwoRooms:
             self.tri_rooms = {R1: RoomBound(bus, "triage", R1), R2: RoomBound(bus, "triage", R2)}
             tri_client = MultiRoomClient(self.tri_rooms)
         self.triage = TriageAgent(tri_client, store=self.store, known_store=self.known, known_on=known_on,
-                                  customers={R1: ("meera", "acme-env"), R2: ("kiran", "nepal-env")}, **kw("triage"))
+                                  customers={R1: ("meera", "acme-env"), R2: ("kiran", "nepal-env")},
+                                  fix_rooms=fix_rooms, **kw("triage"))
+        self.fixer = FakeFixer()
         agents = [
             self.triage,
             RunnerAgent(bus.client("runner"), self.sandbox, **kw("runner")),
-            FixerAgent(bus.client("fixer"), FakeFixer(), issues_path=tmp_path / "ISSUES.md", **kw("fixer")),
+            FixerAgent(bus.client("fixer"), self.fixer, issues_path=tmp_path / "ISSUES.md", **kw("fixer")),
             AcmeEnvAgent(bus.client("acme-env"), self.meera_machine, ask_before_install=False, **kw("acme-env")),
             AcmeEnvAgent(bus.client("nepal-env"), self.kiran_machine, customer="kiran", ask_before_install=False,
                          name="nepal-env", **kw("nepal-env")),
@@ -346,5 +348,61 @@ def test_triage_main_serves_side_room_only_with_flag(monkeypatch, flag, expected
     triage.main()
     assert got["name"] == "triage" and got["extra_rooms"] == expected
     agent = got["make"](_Rec("triage"))
+    assert agent.fix_rooms == ({"rid-main"} if flag else None)
     assert agent.customers == {"rid-main": ("meera", "acme-env"), "rid-np": ("kiran", "nepal-env")}
     assert agent.human_ids["kiran"].endswith("-kiran:localhost")
+
+
+
+# ---------------------------------------------------------------- runner in side rooms; no fixer there
+
+async def test_no_match_in_side_room_bisects_then_stops_at_confirmed(tmp_path):
+    """No known record: Kiran's case is investigated for real in room 2 (runner serves it),
+    confirmed on Kiran's machine, then stops with a clear line because fixer serves room 1 only."""
+    from woym.agents.triage import NO_FIX_HERE
+
+    w = TwoRooms(tmp_path, fix_rooms={R1})
+    root, case2 = await w.kiran_case()
+    assert case2.step == Step.CONFIRMED_BOTH
+    r2 = "\n".join(p.text for p in w.bus.log if p.room == R2)
+    assert "NOT REPRODUCED" in r2 and "← CULPRIT" in r2 and "CONFIRMED ON BOTH MACHINES" in r2
+    assert NO_FIX_HERE in r2 and "reply **patch it**" not in r2
+    assert ("run_repro", {"tz": "UTC"}) in w.kiran_machine.calls
+    w.bus.human("dev", "patch it", root, room=R2)
+    await w.bus.settle()
+    assert w.store.all()[-1].step == Step.CONFIRMED_BOTH and w.fixer.calls == []
+    assert r2.count(NO_FIX_HERE) == 1 and "\n".join(p.text for p in w.bus.log).count(NO_FIX_HERE) == 2
+
+
+async def test_fix_rooms_default_is_todays_behaviour(tmp_path):
+    w = TwoRooms(tmp_path, known_on=False)          # fix_rooms=None
+    await w.case1_fixed()                           # patch prompt + fix work in room 1 as before
+    assert w.fixer.calls and "reply **patch it**" in "\n".join(p.text for p in w.bus.log)
+
+
+@pytest.mark.parametrize("flag,expected", [(False, []), (True, ["acme-nepal"])])
+def test_runner_main_serves_side_room_only_with_flag(monkeypatch, flag, expected):
+    from woym import config
+    from woym.agents import base, runner_agent
+    from woym.switch import creds
+
+    data = {"room": {"id": "rid-main"}, "rooms": {"acme-support": {"id": "rid-main"}, "acme-nepal": {"id": "rid-np"}}}
+    monkeypatch.setattr(creds, "load", lambda *a, **k: data)
+    monkeypatch.setattr(config, "KNOWN_ENABLED", flag)
+    monkeypatch.setitem(config.CUSTOMERS, "acme-support", ("meera", "acme-env", "acme-laptop"))
+    got = {}
+    monkeypatch.setattr(base, "run_agent", lambda make, name, **kw: got.update(kw, name=name))
+    monkeypatch.setattr(runner_agent, "run_agent", base.run_agent)
+    runner_agent.main()
+    assert got["name"] == "runner" and got["extra_rooms"] == expected
+
+
+def test_side_rooms_skips_missing_and_active(monkeypatch):
+    from woym import config
+    from woym.agents import base
+    from woym.switch import creds
+
+    monkeypatch.setattr(config, "KNOWN_ENABLED", True)
+    monkeypatch.setitem(config.CUSTOMERS, "acme-support", ("meera", "acme-env", "acme-laptop"))
+    monkeypatch.setattr(creds, "load", lambda *a, **k: {"room": {"id": "x"}, "rooms": {"acme-support": {"id": "x"}}})
+    assert base.side_rooms() == []                    # acme-nepal not set up yet

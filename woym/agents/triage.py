@@ -21,6 +21,8 @@ from woym.case.state import CaseStore, GuardError
 from woym.contracts import (ENV_KEYS, BisectReport, BisectStep, Case, Env, FixResult, MessageEvent, RunResult, Step,
                             SwitchClient)
 
+NO_FIX_HERE = ("_Confirmed. Fixing isn't set up in this room in this demo (fixer serves the main support "
+               "room only), so this case stops here._")
 PATCH_RE = re.compile(r"\b(patch|fix)\b", re.I)
 MENTION = "@" + config.AGENT_TRIAGE
 
@@ -46,7 +48,8 @@ class TriageAgent(Agent):
                  vendor_human: str = config.VENDOR_HUMAN, customer_human: str = config.CUSTOMER_HUMAN,
                  human_ids: dict[str, str] | None = None,
                  customers: dict[str, tuple[str, str]] | None = None,
-                 known_store: known.KnownStore | None = None, known_on: bool | None = None, **kw) -> None:
+                 known_store: known.KnownStore | None = None, known_on: bool | None = None,
+                 fix_rooms: set[str] | None = None, **kw) -> None:
         super().__init__(client, **kw)
         self.store = store or CaseStore()
         self.vendor_env = vendor_env
@@ -59,6 +62,7 @@ class TriageAgent(Agent):
         self.known_on = known.enabled() if known_on is None else known_on
         self.known = known_store or known.KnownStore()
         self._event: MessageEvent | None = None  # the tagged event being handled
+        self.fix_rooms = fix_rooms  # rooms where fixer can work; None = every room (today)
 
     def _customer(self, room_id: str) -> tuple[str, str]:
         return self.customers.get(room_id, (self.customer_human, config.AGENT_CUSTOMER))
@@ -234,12 +238,23 @@ class TriageAgent(Agent):
         if over.passed and not real.passed and not vendor_fail.passed:
             self._advance(case, Step.CONFIRMED_BOTH)
             await self.say(case.room_id, case.thread_id,
-                           text + f"\n\n_@{self.vendor_human}: reply **patch it** in this thread to have fixer write the fix._")
+                           text + "\n\n" + self._patch_hint(case))
         else:
             await self.say(case.room_id, case.thread_id, text)
             await self._fail(case, "The customer-machine runs did not confirm the sandbox bisect.")
 
+    def _can_fix_here(self, case: Case) -> bool:
+        return self.fix_rooms is None or case.room_id in self.fix_rooms
+
+    def _patch_hint(self, case: Case) -> str:
+        if self._can_fix_here(case):
+            return f"_@{self.vendor_human}: reply **patch it** in this thread to have fixer write the fix._"
+        return NO_FIX_HERE
+
     async def _request_fix(self, case: Case) -> None:
+        if not self._can_fix_here(case):
+            await self.say(case.room_id, case.thread_id, NO_FIX_HERE)
+            return
         if case.step not in (Step.CONFIRMED_BOTH, Step.REPRODUCED):
             await self.say(case.room_id, case.thread_id,
                            f"Case #{case.id} is at `{case.step.value}`; I can patch after CONFIRMED BOTH.")
@@ -354,7 +369,7 @@ def _report(vendor: Env, customer: Env, kv: dict[str, str], results: dict[str, b
 
 
 def main() -> None:
-    from woym.agents.base import run_agent
+    from woym.agents.base import active_room_id, run_agent, side_rooms
     from woym.switch import creds
 
     ids: dict[str, str] = {}
@@ -365,19 +380,19 @@ def main() -> None:
     except FileNotFoundError:
         pass
     customers: dict[str, tuple[str, str]] = {}
-    extra: list[str] = []  # other customer rooms to serve, only with WOYM_KNOWN=1
     try:
-        data = creds.load()
-        rooms, active = data.get("rooms", {}), data.get("room", {}).get("id")
+        rooms = creds.load().get("rooms", {})
         for room_name, (human, agent, _container) in config.CUSTOMERS.items():
             if room_name in rooms:
                 customers[rooms[room_name]["id"]] = (human, agent)
-                if config.KNOWN_ENABLED and rooms[room_name]["id"] != active:
-                    extra.append(room_name)
     except FileNotFoundError:
         pass
-    run_agent(lambda c: TriageAgent(c, human_ids=ids, customers=customers), config.AGENT_TRIAGE,
-              extra_rooms=extra)
+    extra = side_rooms()  # other customer rooms, only with WOYM_KNOWN=1
+    # fixer serves only the active room: elsewhere a case stops at CONFIRMED (epilogue scope)
+    active = active_room_id()
+    fix_rooms = {active} if extra and active else None
+    run_agent(lambda c: TriageAgent(c, human_ids=ids, customers=customers, fix_rooms=fix_rooms),
+              config.AGENT_TRIAGE, extra_rooms=extra)
 
 
 if __name__ == "__main__":

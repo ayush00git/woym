@@ -168,6 +168,30 @@ class MultiRoomClient:
                 await close()
 
 
+def side_rooms() -> list[str]:
+    """Customer rooms (config.CUSTOMERS names in credentials.json) other than the
+    active room. Only with WOYM_KNOWN=1; otherwise [] and agents serve one room."""
+    from woym.switch import creds
+
+    if not config.KNOWN_ENABLED:
+        return []
+    try:
+        data = creds.load()
+    except FileNotFoundError:
+        return []
+    rooms, active = data.get("rooms", {}), data.get("room", {}).get("id")
+    return [n for n in config.CUSTOMERS if n in rooms and rooms[n]["id"] != active]
+
+
+def active_room_id() -> str | None:
+    from woym.switch import creds
+
+    try:
+        return creds.load().get("room", {}).get("id")
+    except FileNotFoundError:
+        return None
+
+
 def run_agent(make: Callable[[SwitchClient], Agent], name: str, room: str | None = None,
               extra_rooms: list[str] | tuple[str, ...] = ()) -> None:
     """`python -m woym.agents.<name>` entry point using A's real client. `room` is a
