@@ -102,7 +102,8 @@ def mm_session(viewer: str) -> tuple[str, str, str, str]:
     """Log the viewer in to Mattermost (session token for the browser cookie).
     Returns (token, user_id, team_name, channel_name)."""
     data = creds.load()
-    pw = f"Woym-{viewer}-Pass-1!"  # set by woym/switch/setup.py
+    cam = data.get("camera") or {}
+    pw = cam["password"] if viewer == cam.get("username") else data["humans"][viewer]["mm_password"]  # setup.py
     r = httpx.post(f"{MM}/api/v4/users/login", json={"login_id": viewer, "password": pw}, timeout=15)
     r.raise_for_status()
     tok, uid = r.headers["Token"], r.json()["id"]
@@ -146,6 +147,39 @@ LANDING_JS = """
   const b = [...document.querySelectorAll('a,button')].find(e => /view in browser/i.test(e.textContent));
   if (b) { b.click(); return 'clicked'; }
   return document.querySelector('#post-list, #postListContent, .post-list__dynamic') ? 'app' : 'wait';
+})()
+"""
+
+# Open a root post's thread in the right-hand panel (RHS), optionally expanded.
+# Element ids are Mattermost's own: CENTER_commentIcon_<postId> [live, MM in 0.31.0 stack].
+OPEN_RHS_JS = """
+(() => {
+  const id = '%(id)s';
+  const rhsHas = document.querySelector('#rhsContainer [id*="' + id + '"], .ThreadViewer [id*="' + id + '"]');
+  if (!rhsHas) {
+    const post = document.getElementById('post_' + id);
+    if (!post) return 'root not rendered';
+    post.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    const btn = document.getElementById('CENTER_commentIcon_' + id);
+    if (!btn) return 'no reply button';
+    btn.click();
+    return 'clicked';
+  }
+  if (%(expand)s) {
+    const ex = document.querySelector('#rhsContainer .sidebar--right__expand, button[aria-label="Expand Sidebar Icon"], button[aria-label*="xpand"]');
+    const rhs = document.querySelector('#sidebar-right');
+    if (ex && rhs && !rhs.classList.contains('sidebar--right--expanded')) { ex.click(); return 'expanding'; }
+  }
+  return 'open';
+})()
+"""
+
+MEMBERS_JS = """
+(() => {
+  const b = document.getElementById('member_rhs');
+  if (!b) return 'no members button';
+  b.click();
+  return 'open';
 })()
 """
 
@@ -260,10 +294,15 @@ async def record(args: argparse.Namespace) -> int:
                     except Exception:
                         root = None
                     if root and root != seen_root:
-                        seen_root = root
-                        await asyncio.sleep(1.5)  # let the root render in the channel first
-                        await cdp.send("Page.navigate", url=f"{base}/threads/{root}")
-                        log(f"following thread {root}")
+                        await asyncio.sleep(1.0)  # let the root render in the channel first
+                        r = await cdp.send("Runtime.evaluate", returnByValue=True,
+                                           expression=OPEN_RHS_JS % {"id": root, "expand": json.dumps(args.frame == "expanded")})
+                        state = r.get("result", {}).get("value")
+                        if state == "open":
+                            seen_root = root
+                            log(f"thread {root} open in the right panel ({args.frame})")
+                        else:
+                            log(f"thread {root}: {state}, retrying")
                     await asyncio.sleep(1)
 
             tasks = [asyncio.create_task(writer()), asyncio.create_task(keep_bottom()),
@@ -276,11 +315,30 @@ async def record(args: argparse.Namespace) -> int:
                     pass
                 rc = 0
             else:
-                await asyncio.sleep(args.lead_in)
+                if args.members_shot > 0:
+                    # beat 3: who is in the room, with owners in the display names
+                    r = await cdp.send("Runtime.evaluate", returnByValue=True, expression=MEMBERS_JS)
+                    log(f"members panel: {r.get('result', {}).get('value')} ({args.members_shot:.0f}s)")
+                    await asyncio.sleep(args.members_shot)
+                else:
+                    await asyncio.sleep(args.lead_in)
                 cmd = ["uv", "run", "python", "scripts/demo.py", *args.demo_args]
                 log(f"running {' '.join(cmd)}")
-                demo = await asyncio.create_subprocess_exec(*cmd, cwd=config.ROOT)
+                demo = await asyncio.create_subprocess_exec(*cmd, cwd=config.ROOT, stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.STDOUT)
+                timeline = out.with_suffix(".timeline.txt")
+                demo_t0 = time.monotonic() - started
+                with timeline.open("w") as tl:
+                    tl.write(f"# demo.py stdout for {out.name}; [video mm:ss.s] = position in the webm\n")
+                    tl.write(f"# demo.py started at video {demo_t0:.1f}s: {' '.join(cmd)}\n")
+                    async for raw in demo.stdout:
+                        line = raw.decode(errors="replace").rstrip()
+                        v = time.monotonic() - started
+                        tl.write(f"[video {int(v // 60):02d}:{v % 60:04.1f}] {line}\n")
+                        tl.flush()
+                        print(line, flush=True)
                 rc = await demo.wait()
+                log(f"timeline -> {timeline}")
                 log(f"demo.py exited {rc}; recording {args.tail}s more")
                 await asyncio.sleep(args.tail)
             stop.set()
@@ -306,14 +364,18 @@ async def record(args: argparse.Namespace) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Record the WOYM room (read-only viewer)")
-    ap.add_argument("--viewer", default=config.VENDOR_HUMAN, help="Mattermost user to watch as (default dev)")
+    ap.add_argument("--viewer", default="camera", help="Mattermost user to watch as (default camera, made by setup)")
     ap.add_argument("--take", type=int, help="take number (default: next free)")
     ap.add_argument("--zoom", type=float, default=1.25, help="page zoom for readability (default 1.25)")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--attach", action="store_true", help="don't run demo.py; just record --seconds")
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--open-latest", action="store_true", help="open the newest existing thread right away (testing)")
+    ap.add_argument("--frame", choices=["panel", "expanded"], default="expanded",
+                    help="thread in the right panel beside the channel, or the panel expanded over it")
     ap.add_argument("--lead-in", type=float, default=3, help="seconds of idle room before the demo starts")
+    ap.add_argument("--members-shot", type=float, default=10,
+                    help="seconds showing the channel members panel (owners in names) before the demo; 0 = off")
     ap.add_argument("--tail", type=float, default=5, help="seconds to keep recording after demo.py exits")
     ap.add_argument("demo_args", nargs="*", help="args for demo.py (put them after --)")
     return asyncio.run(record(ap.parse_args()))
