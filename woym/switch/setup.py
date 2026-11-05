@@ -78,7 +78,8 @@ async def register_agent(reg_key: str, name: str, description: str) -> dict[str,
         return {"id": d["id"], "api_key": d["api_key"]}
 
 
-async def main() -> int:
+async def main(fresh_room: str | None = None, activate: bool = False) -> int:
+    creds.require_no_live_run()
     env = env_file()
     try:
         data = creds.load()
@@ -144,16 +145,27 @@ async def main() -> int:
         raise SystemExit("[setup] no mattermost bridge; is the collab profile up?")
     bridge_id = mmb[0].get("id") or mmb[0].get("bridge_id")
     room = data.get("room")
+    new_room = False
+    if fresh_room:
+        room = None  # a new room; the active room stays as it is unless --activate
     if room and (await gw[DEV].get(f"/rooms/{room['id']}")).status_code == 200:
         say(f"room {room['name']} ok (kept)")
     else:
+        new_room = True
+        room_name = fresh_room or config.ROOM_NAME
         d = check(await gw[DEV].post("/rooms", json={
-            "name": config.ROOM_NAME, "description": "Acme support: cases that work on the vendor's machine but not Acme's",
+            "name": room_name, "description": "Acme support: cases that work on the vendor's machine but not Acme's",
             "bridge_id": bridge_id, "agent_names": [config.AGENT_TRIAGE, config.AGENT_RUNNER, config.AGENT_FIXER],
             "user_names": [DEV, MEERA], "channel_type": "channel_public", "internal_only": False,
         }), "create room")
-        room = data["room"] = {"id": d["id"], "name": config.ROOM_NAME, "channel_id": d.get("external_channel_id"), "bridge_id": bridge_id}
-        say(f"room {config.ROOM_NAME} created ({room['id']})")
+        room = {"id": d["id"], "name": room_name, "channel_id": d.get("external_channel_id"), "bridge_id": bridge_id}
+        data.setdefault("rooms", {})[room_name] = room
+        if not fresh_room or activate or "room" not in data:
+            data["room"] = room
+            say(f"room {room_name} created ({room['id']}), ACTIVE")
+        else:
+            say(f"room {room_name} created ({room['id']}), stored as rooms.{room_name}; "
+                f"active room unchanged ({data['room']['name']}). Pass --activate to switch")
     creds.save(data)
     acme_id = data["agents"][config.AGENT_CUSTOMER]["id"]
     for who, client in (("meera", gw[MEERA]), ("dev", gw[DEV]), ("admin", admin)):
@@ -184,13 +196,9 @@ async def main() -> int:
     check(await gw[MEERA].put(f"/agents/{acme_id}/addressing-policy", json=rule), "acme-env custom rule")
     say("acme-env addressing: meera + meera's agents + triage (set by meera)")
 
-    # Follow-ups off
-    if room.get("channel_id") and not room.get("followups_off"):
-        r = await httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=30, headers={
-            "Authorization": f"Bearer {data['humans'][DEV]['mm_token']}"}).post(
-            "/posts", json={"channel_id": room["channel_id"], "message": "!follow-ups off"})
-        say(f"posted '!follow-ups off' as dev -> {r.status_code}")
-        room["followups_off"] = r.status_code == 201
+    # Follow-ups: already off server-wide on 0.31.0 [live]: posting "!follow-ups off"
+    # only makes Switch reply "isn't switched on", so we no longer post it.
+
     creds.save(data)
 
     # Human participant ids: the exact `sender` on message events, e.g.
@@ -204,6 +212,8 @@ async def main() -> int:
     for t in (ctx or {}).get("result", {}).get("threads", []):
         entries += [t.get("root") or {}] + list(t.get("replies") or [])
     for h in (DEV, MEERA):
+        if data["humans"][h].get("switch_participant_id"):
+            continue  # same id in every room on this bridge [live]
         ids = {e.get("sender") for e in entries
                if e.get("sender_name") == h and (e.get("sender") or "").startswith("@switch-mattermost-")}
         if len(ids) == 1:
@@ -212,6 +222,11 @@ async def main() -> int:
         else:
             MANUAL.append(f"no unique participant id for {h} in room history (found {ids}); "
                           f"post one message as {h} and re-run setup")
+    creds.save(data)
+
+    await brand_agents(data, gw, env)
+    if new_room:
+        await wait_for_greetings(data, room["id"])
     creds.save(data)
 
     say(f"credentials -> {creds.CREDS_FILE}")
@@ -224,5 +239,86 @@ async def main() -> int:
     return 0
 
 
+LABELS = {
+    config.AGENT_TRIAGE: "triage · owner: dev (vendor)",
+    config.AGENT_RUNNER: "runner · owner: dev (vendor)",
+    config.AGENT_FIXER: "fixer · owner: dev (vendor)",
+    config.AGENT_CUSTOMER: "acme-env · owner: meera (Acme)",
+}
+VENDOR_RGB, CUSTOMER_RGB = (37, 99, 235), (217, 119, 6)  # blue = vendor, amber = customer
+
+
+def _png(rgb: tuple[int, int, int], n: int = 128) -> bytes:
+    """A solid-colour PNG, no dependencies."""
+    import struct
+    import zlib
+
+    raw = b"".join(b"\x00" + bytes(rgb) * n for _ in range(n))
+
+    def chunk(t: bytes, d: bytes) -> bytes:
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+async def brand_agents(data: dict[str, Any], gw: dict[str, httpx.AsyncClient], env: dict[str, str]) -> None:
+    """Show each agent's owner in Mattermost: the display name is set by the owner
+    through Switch (PUT /gateway/agents/{id}/name, which renames the MM bot) [live].
+    Avatars are uploaded straight to Mattermost as admin, because Switch's icon_url
+    did not reach the bot [live]. Re-run setup after a stack restart in case they reset."""
+    for name, label in LABELS.items():
+        a = data["agents"][name]
+        r = await gw[a["owner"]].put(f"/agents/{a['id']}/name", json={"name": name, "display_name": label})
+        say(f"display name {label!r} -> {r.status_code}")
+        if r.status_code != 200:
+            MANUAL.append(f"display name for {name}: {r.status_code} {r.text[:120]}")
+    mm = httpx.AsyncClient(base_url=f"{MM}/api/v4", timeout=30)
+    r = await mm.post("/users/login", json={"login_id": env["MATTERMOST_ADMIN_USER"], "password": env["MATTERMOST_ADMIN_PASSWORD"]})
+    mm.headers["Authorization"] = f"Bearer {r.headers['Token']}"
+    cfg = (await mm.get("/config")).json().get("TeamSettings", {}).get("TeammateNameDisplay")
+    if cfg not in ("full_name", "nickname_full_name"):
+        await mm.put("/config/patch", json={"TeamSettings": {"TeammateNameDisplay": "full_name"}})
+        say(f"mattermost TeammateNameDisplay {cfg} -> full_name")
+    for name in LABELS:
+        u = (await mm.get(f"/users/username/{name}")).json()
+        rgb = CUSTOMER_RGB if data["agents"][name]["owner"] == MEERA else VENDOR_RGB
+        r = await mm.post(f"/users/{u['id']}/image", files={"image": (f"{name}.png", _png(rgb), "image/png")})
+        if r.status_code != 200:
+            MANUAL.append(f"avatar for {name}: {r.status_code}")
+    say("avatars: vendor agents blue, acme-env amber")
+
+
+async def wait_for_greetings(data: dict[str, Any], room_id: str, timeout: float = 45) -> None:
+    """Switch posts a join greeting for each agent when it is added to a room
+    (wording varies: "Hey! I'm on standby — @triage to get started.") [live],
+    within the same second, whether or not the agent is connected. Wait until all
+    four have a message in the room, so they are at the top before any demo."""
+    tri = data["agents"][config.AGENT_TRIAGE]
+    want = set(LABELS)
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    async with httpx.AsyncClient(base_url=SWITCH, timeout=30, headers={"Authorization": f"Bearer {tri['api_key']}"}) as c:
+        while loop.time() < end:
+            r = await c.post(f"/agents/{tri['id']}/ops/read_context", json={"limit": 100, "room_id": room_id})
+            seen = {e.get("sender_name") for t in (r.json().get("result") or {}).get("threads", [])
+                    for e in [t.get("root") or {}] + list(t.get("replies") or [])
+                    if e.get("kind", "message") == "message" and e.get("sender_name") in want}
+            if want <= seen:
+                say("join greetings posted for all 4 agents")
+                return
+            await asyncio.sleep(1.5)
+    MANUAL.append(f"join greetings missing for {sorted(want - seen)} after {timeout:.0f}s; wait before recording")
+
+
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--fresh-room", metavar="NAME", help="create a new room (same agents, rule, links) as rooms.NAME")
+    ap.add_argument("--activate", action="store_true", help="with --fresh-room: also make it the active room")
+    a = ap.parse_args()
+    try:
+        sys.exit(asyncio.run(main(a.fresh_room, a.activate)))
+    except creds.LiveRunLocked as e:
+        sys.exit(f"[setup] REFUSED: {e}")

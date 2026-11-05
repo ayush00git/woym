@@ -27,7 +27,17 @@ Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** 
 ### Surprises that matter for C and B
 - **`@name` inside `post_message` DOES address** (`addressed:true` at the target). The brief said it addresses nobody. Keep using `send_targeted` (it returns statuses), and don't put `@agent` in prose you `post()` unless you mean it.
 - **Refused addressing produces a visible auto-reply** in the thread from the target agent, posted by Switch on its behalf, e.g. `@dev I only take instructions from my owner, and this chat account isn't…`. On camera, nobody should @mention `@acme-env` unless the rule admits them.
-- Every agent posts **"Hi! Mention @<name> to get my attention."** when it joins a room. setup.sh triggers this once, at room creation.
+- Switch posts a **join greeting for each agent when it's added to a room** (randomised wording: "Hey! I'm on standby — @triage to get started.", "Hi! Mention @kt-dev to get my attention."). It posts at room creation, in the same second, whether or not the agent is connected [live, 2 rooms]. So greetings always sit at the top of a fresh room.
+
+## 0b. Showing owners on screen [live]
+- **Display name:** the owner calls `PUT /gateway/agents/{id}/name {"name": <same>, "display_name": "acme-env · owner: meera (Acme)"}` → 200, and Switch renames the Mattermost bot (`first_name` / bot `display_name`). Mattermost `TeamSettings.TeammateNameDisplay` must be `full_name` (it already is; setup enforces it).
+- **Avatar:** `PUT /gateway/agents/{id}/icon {icon_url}` → 200 but did NOT reach the MM bot (no picture update within 6 s; Switch seems to set the bot icon only when it creates the identity). Instead setup uploads a PNG straight to Mattermost as admin: `POST /api/v4/users/{bot_user_id}/image` → 200. Vendor agents are blue, acme-env is amber. Re-run setup after a stack restart in case Switch resets the images [assumed].
+- setup.py applies both on every run (`LABELS` in woym/switch/setup.py).
+
+## 0c. Preflight and rooms
+- `uv run python scripts/status.py [--json]` is read-only: health, live-run lock, active room, each agent's connection (Gateway `rooms[].status=="live"` in the active room), owner, addressing rule in words, and the latest case step. Exit 0 = READY. It never connects as an agent: **a second connection for the same agent takes over its room claim** from the running process.
+- `uv run python -m woym.switch.setup --fresh-room <name> [--activate]` creates a new room with the same agents, rule and links under `rooms.<name>` in credentials.json. The active room changes only with `--activate`. It waits until all 4 join greetings are in.
+- **Live-run lock** (contracts §8): while `var/run/live.lock` holds a live pid, `creds.save()` and every setup mode refuse. A stale lock (dead pid) is removed automatically.
 - `list_participants` ids are **UUIDs** (agent id / user id), NOT the event `sender` ids. Map kinds by `name`.
 - Message ids and `thread_id`s are Switch ids (`sw_<hex>`), **not** Mattermost post ids. `humans.py` prints the Mattermost post id. Use that only for `humans.py --thread`, never to compare with an agent's `thread_id`.
 - Switch's own notices come from `@switch-admin:localhost` with `sender_kind: null`. The client maps them to `sender_kind="system"`.

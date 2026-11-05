@@ -203,3 +203,42 @@ EOF
 - **Impact:** One failed live run. No product bug, but anything that rewrites creds while agents run splits humans from agents.
 - **Root cause:** The lead assigned A7 without a rule for who may change the shared live stack.
 - **Workaround / next step:** A restores acme-support as the active room. New rule in docs/contracts.md §8: a live lock held by demo.py; setup refuses while it's held; fresh rooms change the active room only with --activate; tests never touch the real creds. demo.py also snapshots the room id and fails fast if creds change.
+
+## [2026-11-05 18:58 IST] agents (switch-90) | test_integration flake: shared test container name (fixed); @agent mentions in prose (fixed)
+- **Status:** fixed
+- **What happened:**
+  1. A saw `git archive 714d278…^{tree}: not a valid object name` in tests/agents/test_integration.py. Cause: the test used one fixed container name (woym-test-acme-laptop-agents). Two sessions running it at once share and re-install that container, so one run's customer machine reported a fix sha that only existed in the other run's tmp bare remote. I had one unexplained failure (13.8 s) at the same time, and 6 passes alone.
+  2. Live Switch addresses any "@name" in an agent post (docs/switch-notes.md §0), but our cards and prose mentioned agents: "`@triage` (vendor) asked…" in the consent card, "@fixer write the fix", "⚠️ @acme-env is …", "`@triage patch it`", and "bizclock@main" / "bizclock @ sha".
+- **Evidence:** A's report via the lead; grep of woym/agents and woym/case/card.py.
+- **Impact:** (1) flaky CI for whoever runs it alongside someone else; (2) visible refusals from agents on camera.
+- **Workaround / next step:**
+  1. The container name is now per-process (`-{pid}`), and the test installs v2.3.1 before the flow and asserts the consent card shows `v2.3.1`. The sandbox and customer machine already share the same tmp bare remote.
+  2. Agent names are now written without "@", and "at <sha>" replaces "@ <sha>". Only humans are @-pinged (@meera, @dev). The CONFIRMED card now says "@dev: reply **patch it** in this thread", and triage accepts "patch it" from dev in a case thread without a mention (live thread replies arrive addressed:false). Both fake clients (tests/agents/fakes.py, fakeswitch.py) now FAIL any agent post that @-mentions an agent, so every flow test enforces this, and tests/case/test_card.py scans every card template.
+
+## [2026-11-05 19:00 IST] platform (switch-ba) | I switched the active room in the middle of B's live demo run (18:57)
+- **Status:** fixed
+- **What happened:** while testing A7, I ran `python -m woym.switch.setup --fresh-room woym-selftest`. That version made the new room active in var/switch/credentials.json. B's demo was running against acme-support, and my own `ps` output showed its agents, but I ran it anyway. humans.py then posted Meera's "yes" to the new channel with the old root, and Mattermost returned 400 "Invalid ChannelId for RootId".
+- **Evidence:** B's message; credentials.json room changed c412e4b6 → bbf26bd6 at 18:57:10.
+- **Impact:** one demo run lost. Leftover: an orphan room woym-selftest (bbf26bd6) with only join greetings.
+- **Workaround / next step:** I restored credentials.json from my pre-run backup at 18:58. Fixes: `--fresh-room` no longer changes the active room without `--activate`; the live-run lock (var/run/live.lock, contracts §8) now blocks creds.save() and every setup mode (tests/switch/test_creds.py). My rule: no setup, killtest or agent connection on the shared stack without checking the lock and pinging B.
+
+## [2026-11-05 19:00 IST] platform (switch-ba) | Agent icon set through Switch doesn't reach the Mattermost bot
+- **Status:** worked-around
+- **What happened:** `PUT /gateway/agents/{id}/icon {icon_url: dicebear png}` → 200, but the MM bot's last_picture_update didn't change.
+- **Evidence:** switch log "Set agent acme-env icon by user meera"; MM /users/username/acme-env last_picture_update unchanged after 6 s.
+- **Impact:** owner colours have to be set another way.
+- **Workaround / next step:** setup uploads avatars directly via the MM API as admin. acme-env's Switch icon_url is still set to the dicebear URL from the test; harmless.
+
+## [2026-11-05 19:00 IST] platform (switch-ba) | Second connection for the same agent takes over its room claim
+- **Status:** open (rule for everyone)
+- **What happened:** at 18:55 I connected a test client as @runner while a live runner may have been running; afterwards the Gateway showed no session for runner. This is per protocol: a second connection takes over the room claim.
+- **Evidence:** docs/official/internals/agent-protocol.md "Reopening… is a takeover"; sessions empty 9 s after my test client stopped.
+- **Impact:** any probe or smoke test that runs during a demo silently steals an agent's room claim.
+- **Workaround / next step:** `scripts/status.py` is read-only and is the way to check. Never run `woym.switch.probe` while the live lock is held.
+
+## [2026-11-05 19:00 IST] sandbox (switch-7c) | Guards added after live run 2 (re: lead's "credentials rewrite mid-run" entry)
+- **Status:** fixed
+- **What happened:** demo.py now (1) takes var/run/live.lock (plain-int pid; a live holder blocks a second demo, a dead holder's lock is taken over) and releases it on success, failure, Ctrl-C and SIGTERM; (2) snapshots the room id and channel id from credentials.json before the agents start, and fails fast (exit 3, naming both rooms) if they change before any poll or humans.py post.
+- **Evidence:** tests/sandbox/test_sandbox_demo.py::test_live_lock and ::test_room_guard_detects_rewrite. A manual SIGTERM during agent start left no lock and no agent processes.
+- **Impact:** a mid-run setup can no longer silently split humans from agents. Setup's side (refusing while the lock exists) is platform's.
+- **Workaround / next step:** none.
