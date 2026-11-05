@@ -380,3 +380,10 @@ EOF
 - **Evidence:** var/killtest/two_rooms.json. Archived channels kt2-main-bd2b / kt2-side-3723 show "V1/V2/V3 agent posts in main|side" in the right channel each time. My script's immediate Mattermost read missed the main posts (it read too early, the same false alarm as the kill test); a later read shows them.
 - **Impact:** C's epilogue design works.
 - **Workaround / next step:** recommended V1: a second `WsSwitchClient(name, id, api_key, side_room_id)` in the same process. Each has its own connection id and claim, so posts can never go to the wrong room. V3 has a race: a concurrent task can post between connect_to_room(side) and post_message and land in the wrong room.
+
+## [2026-11-05 19:21 IST] platform (switch-ba) | Final take recorded (take-905); recorder timeline bug found and fixed
+- **Status:** fixed
+- **What happened:** `record.py -- --fixer claude` in acme-support-take1 at HEAD 21808bf: demo.py exit 0, FIXED ON MEERA'S MACHINE at 57.0 s, claude -p fix ≈30 s (fix_req 19.1 s → fix_pushed 49.2 s), 73 s of video. But every line in take-905.timeline.txt was stamped 01:07.2, because demo.py's stdout was block-buffered through the pipe and arrived all at once at exit.
+- **Evidence:** media/raw/take-905.webm, take-905.timeline.txt, take-905-still-{members,bisect,refusal,fixed}.jpg
+- **Impact:** the editor's run clock for this take is derived, not measured.
+- **Workaround / next step:** I rebuilt the take-905 timeline as 10.1 s (demo launch, measured) + demo.py's own clock, labelled DERIVED in the file header (true positions up to ~1 s later). record.py now runs demo.py with PYTHONUNBUFFERED=1 for future takes (not yet re-run).

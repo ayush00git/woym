@@ -324,8 +324,10 @@ async def record(args: argparse.Namespace) -> int:
                     await asyncio.sleep(args.lead_in)
                 cmd = ["uv", "run", "python", "scripts/demo.py", *args.demo_args]
                 log(f"running {' '.join(cmd)}")
+                # unbuffered, or every line arrives at exit with the same video stamp
                 demo = await asyncio.create_subprocess_exec(*cmd, cwd=config.ROOT, stdout=asyncio.subprocess.PIPE,
-                                                            stderr=asyncio.subprocess.STDOUT)
+                                                            stderr=asyncio.subprocess.STDOUT,
+                                                            env={**os.environ, "PYTHONUNBUFFERED": "1"})
                 timeline = out.with_suffix(".timeline.txt")
                 demo_t0 = time.monotonic() - started
                 with timeline.open("w") as tl:
