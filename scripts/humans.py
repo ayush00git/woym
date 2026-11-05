@@ -24,12 +24,21 @@ from woym.switch import creds  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("who", choices=[config.VENDOR_HUMAN, config.CUSTOMER_HUMAN])
+    ap.add_argument("who", choices=sorted({config.VENDOR_HUMAN, config.CUSTOMER_HUMAN}
+                                          | {h for h, _a, _c in config.CUSTOMERS.values()}))
+    ap.add_argument("--room", help="room key in credentials rooms.<key> (e.g. acme-nepal); default: the active room")
     ap.add_argument("text")
     ap.add_argument("--thread", help="root post id to reply under, or 'last'")
     a = ap.parse_args()
     data = creds.load()
-    chan = data["room"]["channel_id"]
+    if a.room:
+        room = data["rooms"][a.room]
+    else:
+        # a customer who isn't the active room's customer posts in their own room (e.g. kiran -> acme-nepal)
+        own = [k for k, (h, _a, _c) in config.CUSTOMERS.items() if h == a.who and k in (data.get("rooms") or {})]
+        active_customer = data["room"].get("customer", config.CUSTOMER_HUMAN)
+        room = data["rooms"][own[0]] if own and a.who not in (config.VENDOR_HUMAN, active_customer) else data["room"]
+    chan = room["channel_id"]
     c = httpx.Client(base_url=f"{config.MATTERMOST_URL.rstrip('/')}/api/v4", timeout=30,
                      headers={"Authorization": f"Bearer {data['humans'][a.who]['mm_token']}"})
     root = a.thread

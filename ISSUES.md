@@ -387,3 +387,22 @@ EOF
 - **Evidence:** media/raw/take-905.webm, take-905.timeline.txt, take-905-still-{members,bisect,refusal,fixed}.jpg
 - **Impact:** the editor's run clock for this take is derived, not measured.
 - **Workaround / next step:** I rebuilt the take-905 timeline as 10.1 s (demo launch, measured) + demo.py's own clock, labelled DERIVED in the file header (true positions up to ~1 s later). record.py now runs demo.py with PYTHONUNBUFFERED=1 for future takes (not yet re-run).
+
+## [2026-11-05 19:22 IST] sandbox (switch-7c) | Final take 905: every timeline line stamped with the same video time (stdout buffering)
+- **Status:** open (worked around for the edit; fix after the code freeze)
+- **What happened:** media/raw/take-905.timeline.txt stamps every demo.py line "[video 01:07.2]". demo.py prints without flushing, and when stdout is a pipe (record.py runs it as a subprocess) Python block-buffers it, so the recorder received all lines at exit.
+- **Evidence:** take-905.timeline.txt; frames I extracted from take-905.webm show the events at 10.1 s + demo time (refusal demo 18.6 s → visible at video 29.6 s; FIXED demo 57.0 s → visible at video 67.6 s).
+- **Impact:** the editor can't use the per-line stamps. The header anchor ("demo.py started at video 10.1s") plus the demo seconds is accurate to about ±0.5 s.
+- **Workaround / next step:** after the freeze, either `print(..., flush=True)` in demo.py's Timeline (sandbox) or PYTHONUNBUFFERED=1 in record.py's subprocess env (platform); the lead picks one. The take itself is fine: Claude passed the gate with no fallback (claude -p 28.4 s, $0.06, fix b6a243e), and all script beats are visible.
+
+## [2026-11-05 19:24 IST] platform (switch-ba) | A10: third owner kiran + nepal-env + room acme-nepal set up live (not active)
+- **Status:** fixed
+- **What happened:** `uv run python -m woym.switch.setup --customer acme-nepal`: exit 0, no manual steps. Kiran's participant id came from his room join (no hello needed). Verified via the Gateway API:
+  - room acme-nepal 860bf16e… has agents [triage, runner, fixer, nepal-env] (no acme-env);
+  - nepal-env owner kiran, display "nepal-env · owner: kiran (Acme Nepal)", rules [{owner, owner_agents}, {agents:[triage]}];
+  - kiran's MM account is linked.
+  Re-running with and without --customer is idempotent ("room acme-nepal ok (kept, not active)"); the active room stays acme-support-take1.
+- **Evidence:** this session's output; credentials.json rooms["acme-nepal"], agents["nepal-env"], humans["kiran"].
+- **Impact:** C's epilogue and B's demo --epilogue can run live.
+- **Workaround / next step:** to test humans.py, I posted 2 lines as kiran in acme-nepal and deleted them in Mattermost (DELETE /posts → 200). Switch may still list them in acme-nepal's read_context history (not checked). Agent-to-agent addressing inside acme-nepal isn't exercised live yet; it uses the same rule mechanism the kill test proved.
+- **C's assumption 4 (agent `sender` in read_context == live event sender):** YES, from the kill test (var/killtest/read_context.json vs events.jsonl, kt-dev and kt-meera). Written up in docs/switch-notes.md §0c.
