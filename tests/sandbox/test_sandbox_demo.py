@@ -77,7 +77,7 @@ def test_full_flow(tmp_path):
     assert code == 0
     assert room.posts == [
         ("meera", demo.REPORT, None), ("meera", "yes", "root-1"),
-        ("dev", "@triage patch it", "root-1"), ("meera", "yes", "root-1"),
+        ("dev", demo.PATCH_LINE, "root-1"), ("meera", "yes", "root-1"),
     ]
     assert "*** FIXED ON MEERA'S MACHINE ***" in out
     assert out.count("[SCRIPTED]") == 4
@@ -235,7 +235,7 @@ def test_refusal_beat_after_confirmed_card(tmp_path):
 def test_full_flow_with_refusal_and_fixed_card(tmp_path):
     code, room, out = run_thread(tmp_path)
     assert code == 0
-    assert [p[1] for p in room.posts] == [demo.REPORT, "yes", demo.REFUSAL_LINE, "@triage patch it", "yes"]
+    assert [p[1] for p in room.posts] == [demo.REPORT, "yes", demo.REFUSAL_LINE, demo.PATCH_LINE, "yes"]
     assert "*** FIXED ON MEERA'S MACHINE *** (card visible in the thread)" in out
 
 

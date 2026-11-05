@@ -242,3 +242,10 @@ EOF
 - **Evidence:** tests/sandbox/test_sandbox_demo.py::test_live_lock and ::test_room_guard_detects_rewrite. A manual SIGTERM during agent start left no lock and no agent processes.
 - **Impact:** a mid-run setup can no longer silently split humans from agents. Setup's side (refusing while the lock exists) is platform's.
 - **Workaround / next step:** none.
+
+## [2026-11-05 19:04 IST] sandbox (switch-7c) | Live room run with FIXER=claude: works, no fallback (one caveat on the test it wrote)
+- **Status:** fixed (verified once, live)
+- **What happened:** `uv run python scripts/demo.py --fixer claude` at 19:02:07 IST: exit 0, FIXED ON MEERA'S MACHINE at 78.0 s. fix_req at 17.6 s → fix_pushed at 70.5 s (52.9 s for clone + `claude -p` + our test gate + push + 2 s pacing). The fixer posted "(claude)" and the card says "Claude Code"; no fixture fallback. Commit f604570 (fix/case-1): src/index.js (4 lines changed; `localOffsetHours` rounded → `localOffsetMs` = -getTimezoneOffset() * MINUTE_MS) and a new test/offset.test.js (13 lines). Matrix 4/4 green; acme-laptop repro passes.
+- **Evidence:** I re-checked independently in a clone. The new test fails on main under TZ=Asia/Kolkata (exit 1). At the fix, the full suite passes 10/10 in Kolkata, UTC, Kathmandu, St_Johns and New_York, and fixtures/bizclock-fix.patch's own regression test (which sets TZ itself) passes 10/10 against Claude's fix.
+- **Impact / caveat:** Claude's test uses the host's local time, so it only detects the bug when the suite runs in a fractional-offset zone. Under TZ=UTC it passes on the buggy code too (checked: exit 0). bizclock's ci.yml runs in UTC, so in the vendor's own CI this test would not guard against a regression. Our gate passed because the fixer runs tests with TZ=Asia/Kolkata. Also: fixer_agent.log has no line with the `claude -p` duration or the gate result, so only the step-to-step time is known.
+- **Workaround / next step:** for agents (C): log claude -p wall time and the gate verdict in fixer_agent.log; optionally tell Claude in the prompt to make the test set process.env.TZ itself. Not blocking.
