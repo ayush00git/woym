@@ -4,7 +4,7 @@ from woym.contracts import BisectReport, BisectStep, Env, RunResult
 
 VENDOR = Env(node="22", lang="en_US.UTF-8", os="alpine", bizclock="main", tz="UTC")
 CUSTOMER = Env(node="20", lang="en_IN.UTF-8", os="bookworm", bizclock="v2.3.1", tz="Asia/Kolkata")
-EXPECTED = "cutoff=Fri 17:30 IST payout=Fri"
+EXPECTED = "cutoff=Fri 17:30 payout=Fri"  # same for every env (sandbox contract)
 
 
 def run(env: Env, passed: bool, where: str = "vendor-sandbox") -> RunResult:
@@ -12,7 +12,7 @@ def run(env: Env, passed: bool, where: str = "vendor-sandbox") -> RunResult:
         env=env,
         passed=passed,
         expected=EXPECTED,
-        actual="cutoff=Fri 17:30 payout=Fri" if passed else "cutoff=Fri 17:30 payout=Mon",
+        actual="cutoff=Fri 17:30 payout=Fri" if passed else "cutoff=Mon 17:00 payout=Mon",
         exit_code=0 if passed else 1,
         duration_s=1.23,
         log_tail="",

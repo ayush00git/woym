@@ -43,7 +43,7 @@ def test_suspect_table_same_values():
 def test_bisect_no_culprit():
     r = report()
     r.culprits.clear()
-    assert "no single culprit" in card.bisect(1, r)
+    assert "no culprit found" in card.bisect(1, r)
     assert "CULPRIT" not in card.bisect(1, r)
 
 
@@ -121,3 +121,24 @@ def test_tables_are_separated_by_blank_lines():
                 assert lines[i - 1] == "", t
             if is_row and i + 1 < len(lines) and not lines[i + 1].startswith("|"):
                 assert lines[i + 1] == "", t
+
+
+def test_bisect_skipped_when_baseline_fails_or_target_passes():
+    r = report()
+    skipped = r.__class__(baseline=run(VENDOR, False), target=r.target, steps=[], culprits=[])
+    t = card.bisect(1, skipped)
+    assert "skipped" in t.splitlines()[0] and "vendor env already fails" in t and "CULPRIT" not in t
+    skipped2 = r.__class__(baseline=r.baseline, target=run(CUSTOMER, True), steps=[], culprits=[])
+    assert "customer env passes" in card.bisect(1, skipped2)
+
+
+def test_bisect_pair_culprit_marks_both_rows():
+    from woym.contracts import BisectStep
+    r = report()
+    singles = [BisectStep(s.key, s.vendor_value, s.customer_value, run(s.result.env, True)) for s in r.steps]
+    pair = BisectStep("lang+tz", "x", "y", run(CUSTOMER, False))
+    rep = r.__class__(baseline=r.baseline, target=r.target, steps=singles + [pair], culprits=["lang+tz"])
+    t = card.bisect(1, rep)
+    body = rows(t)[1:]
+    assert sum("CULPRIT (pair)" in b for b in body) == 2
+    assert "Pairs tried: `lang+tz` ❌" in t

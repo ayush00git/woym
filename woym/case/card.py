@@ -75,6 +75,9 @@ def suspect_table(
     """Rows node/lang/os/bizclock/tz: vendor → customer, then the result of
     running the vendor env with ONLY that key flipped to the customer value."""
     results = results or {}
+    # pair culprits come as "a+b": mark each member row
+    culprit_keys = {k for c in culprits for k in c.split("+")}
+    paired = {k for c in culprits if "+" in c for k in c.split("+")}
     rows = ["| | key | vendor → customer | alone |", "|:-:|:--|:--|:-:|"]
     for key in ENV_KEYS:
         v, c = getattr(vendor, key), getattr(customer, key)
@@ -82,10 +85,11 @@ def suspect_table(
             rows.append(f"| {SAME} | {key} | {_code(v)} (same) | {SAME} |")
             continue
         passed = results.get(key)
-        culprit = key in culprits
+        culprit = key in culprit_keys
         label = f"**{key}**" if culprit else key
         change = f"{_code(v)} → {_code(c)}"
-        result = _mark(passed) + (" **← CULPRIT**" if culprit else "")
+        tag = " **← CULPRIT (pair)**" if key in paired else " **← CULPRIT**"
+        result = _mark(passed) + (tag if culprit else "")
         icon = "🎯" if culprit else "🔸"
         rows.append(f"| {icon} | {label} | {change} | {result} |")
     return "\n".join(rows)
@@ -108,14 +112,23 @@ def bisect(case_id: int, report: BisectReport) -> str:
     vendor, customer = report.baseline.env, report.target.env
     results = {s.key: s.result.passed for s in report.steps}
     if report.culprits:
-        extra = "culprit: " + " + ".join(f"`{k}`" for k in report.culprits)
+        extra = "culprit: " + ", ".join(f"`{k}`" for k in report.culprits)
+    elif not report.steps:
+        extra = "skipped"
     else:
-        extra = "no single culprit"
+        extra = "no culprit found"
     runs = 2 + len(report.steps)
     footer = (
         f"Vendor env {_mark(report.baseline.passed)} · full customer env in our sandbox "
         f"{_mark(report.target.passed)} · {runs} sandbox runs"
     )
+    if not report.steps:
+        why = ("the vendor env already fails" if not report.baseline.passed
+               else "the customer env passes in our sandbox too")
+        footer += f"\n_Bisect skipped: {why}, so there is nothing to isolate._"
+    pairs = [s for s in report.steps if "+" in s.key]
+    if pairs:
+        footer += "\nPairs tried: " + ", ".join(f"`{s.key}` {_mark(s.result.passed)}" for s in pairs)
     return "\n".join(
         [
             _header("🔎", "Bisect", case_id, extra),
