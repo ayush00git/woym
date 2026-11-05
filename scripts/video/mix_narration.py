@@ -43,7 +43,10 @@ def log(m: str) -> None:
 def ffprobe_dur(p: Path) -> float:
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)],
                        capture_output=True, text=True)
-    return float(r.stdout.strip())
+    try:
+        return float(r.stdout.strip())
+    except ValueError:  # "N/A": e.g. a recording that was all silence and trimmed to nothing
+        return 0.0
 
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -64,6 +67,8 @@ def beats_with_starts() -> list[dict]:
 
 def make_placeholders(beats: list[dict], kind: str) -> None:
     VO.mkdir(parents=True, exist_ok=True)
+    for old in VO.glob("beat-*.*"):  # replace any earlier test clips first
+        old.unlink()
     for b in beats:
         d = round(b["words"] / WPS, 2)
         src = "anullsrc=r=48000:cl=mono" if kind == "silent" else "sine=frequency=220:sample_rate=48000,volume=0.05"
@@ -74,22 +79,64 @@ def make_placeholders(beats: list[dict], kind: str) -> None:
     log(f"wrote {len(beats)} {kind} placeholder WAVs in {VO} (length = words / {WPS})")
 
 
-def check_clips(beats: list[dict]) -> tuple[list[dict], int]:
+AUDIO_EXTS = (".wav", ".m4a", ".mp3", ".ogg", ".opus", ".flac", ".aac", ".webm", ".mp4")
+CONVERTED = VO / ".converted"
+
+
+def find_clip(n: int) -> tuple[Path | None, str | None]:
+    """beat-07.m4a, beat-7.mp3, Beat-07.WAV … any common recording format. Returns (path, problem)."""
+    hits = [p for p in VO.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXTS
+            and re.fullmatch(rf"beat-0*{n}", p.stem, flags=re.I)]
+    if len(hits) > 1:
+        return None, f"Beat {n} has {len(hits)} recordings ({', '.join(sorted(h.name for h in hits))}). Keep one."
+    return (hits[0] if hits else None), None
+
+
+def convert(src: Path, n: int, trim: bool) -> Path:
+    """Any format, rate or channel count -> 48 kHz mono WAV. With trim, silence before and after
+    the speech is cut (0.15 s kept), because it would otherwise count against the beat."""
+    CONVERTED.mkdir(parents=True, exist_ok=True)
+    out = CONVERTED / f"beat-{n:02d}.wav"
+    edge = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15"
+    args = ["-af", f"{edge},areverse,{edge},areverse"] if trim else []
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), *args,
+                        "-ac", "1", "-ar", str(RATE), str(out)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f"Couldn't read the recording for beat {n} ({src.name}). Is it an audio file? "
+                         f"ffmpeg said: {r.stderr.strip()[-300:]}")
+    if trim and ffprobe_dur(out) < 0.2:  # all silence (e.g. a placeholder): keep it untrimmed
+        return convert(src, n, trim=False)
+    return out
+
+
+def check_clips(beats: list[dict], trim: bool = True) -> tuple[list[dict], int]:
     clips, errors = [], 0
     for b in beats:
-        p = VO / f"beat-{b['n']:02d}.wav"
-        if not p.exists():
-            log(f"beat {b['n']:2}: no clip ({p.name}); silent beat")
+        n = b["n"]
+        src, problem = find_clip(n)
+        if problem:
+            log(f"✗ {problem}")
+            errors += 1
             continue
+        if src is None:
+            log(f"· Beat {n:2}: no recording yet (beat-{n:02d}.m4a / .mp3 / .wav …); this beat stays silent")
+            continue
+        p = convert(src, n, trim)
         d = ffprobe_dur(p)
-        room = b["dur"] - SLACK
-        status = "ok"
+        raw = ffprobe_dur(src)
+        trimmed = f" (after trimming {raw - d:.1f} s of silence)" if trim and raw - d > 0.3 else ""
         if d > b["dur"]:
-            where = f"beat {b['n'] + 1}" if b is not beats[-1] else "past the end of the video"
-            status, errors = f"ERROR: {d:.2f}s runs {d - b['dur']:.2f}s into {where}", errors + 1
-        elif d > room:
-            status = f"WARNING: {d:.2f}s leaves only {b['dur'] - d:.2f}s slack (< {SLACK}s)"
-        log(f"beat {b['n']:2}: {d:5.2f}s of {b['dur']:2}s at {b['start']:3}s  {status}")
+            nxt = f"into beat {n + 1}" if b is not beats[-1] else "past the end of the video"
+            log(f"✗ Beat {n:2}: the recording is {d:.1f} s{trimmed}, but the beat is only {b['dur']} s. "
+                f"It's {d - b['dur']:.1f} s too long and would run {nxt}. Re-record it about "
+                f"{d - b['dur'] + SLACK:.1f} s shorter (the script line has {b['words']} words), or ask for a longer beat.")
+            errors += 1
+        elif d > b["dur"] - SLACK:
+            log(f"! Beat {n:2}: the recording is {d:.1f} s{trimmed} for a {b['dur']} s beat, leaving "
+                f"{b['dur'] - d:.1f} s before the next scene. It fits, but {SLACK} s of breathing room sounds "
+                f"better: about {d - (b['dur'] - SLACK):.1f} s shorter would do it.")
+        else:
+            log(f"✓ Beat {n:2}: {d:.1f} s{trimmed} of {b['dur']} s, starts at {b['start'] // 60}:{b['start'] % 60:02d}")
         clips.append({**b, "path": p, "len": d})
     return clips, errors
 
@@ -197,6 +244,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--placeholders", choices=["silent", "tone"], help="first write test WAVs of length words/2.3")
     ap.add_argument("--force", action="store_true", help="build even if a clip runs past its beat")
+    ap.add_argument("--keep-silence", action="store_true", help="don't trim silence before/after each recording")
     a = ap.parse_args()
     if not ROUGH.exists():
         raise SystemExit(f"{ROUGH} missing: run scripts/video/build_rough_cut.py first")
@@ -206,9 +254,11 @@ def main() -> int:
         log(f"WARNING: rough cut is {total:.1f}s but the script sums to {sum(b['dur'] for b in beats)}s; rebuild the cut")
     if a.placeholders:
         make_placeholders(beats, a.placeholders)
-    clips, errors = check_clips(beats)
+    if not VO.exists():
+        raise SystemExit(f"Put your recordings in {VO} as beat-01.m4a, beat-02.m4a, … (any common audio format).")
+    clips, errors = check_clips(beats, trim=not a.keep_silence)
     if errors and not a.force:
-        log(f"{errors} clip(s) run past their beat; fix or pass --force")
+        log(f"Stopped: {errors} problem(s) above. Fix them and run this again (or pass --force to build anyway).")
         return 1
     if not clips:
         raise SystemExit(f"no clips in {VO}")

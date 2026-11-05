@@ -32,6 +32,17 @@ SWITCH = "http://127.0.0.1:8000"
 MM = "http://127.0.0.1:8065"
 
 RESULTS: dict[str, dict[str, Any]] = {}
+
+sys.path.insert(0, str(ROOT))
+from woym.switch import creds as _creds  # noqa: E402
+from woym.switch.setup import new_password  # noqa: E402
+
+
+def _known_human(h: str) -> dict[str, Any]:
+    try:
+        return _creds.load().get("humans", {}).get(h, {})
+    except FileNotFoundError:
+        return {}
 STATE: dict[str, Any] = {}
 
 
@@ -211,7 +222,9 @@ async def main() -> int:
     STATE["admin"] = me.json()
     users: dict[str, dict[str, str]] = {}
     for handle in ("dev", "meera"):
-        email, pw = f"{handle}@woym.local", f"woym-{handle}-pass-1"
+        # reuse setup's stored password if this user already exists; otherwise a random one
+        known = _known_human(handle)
+        email, pw = f"{handle}@woym.local", known.get("switch_password") or new_password(handle)
         r = await admin.post("/users", json={"name": handle, "email": email, "password": pw, "role": "user"})
         if r.status_code not in (200, 409):
             record(f"S1.create_user.{handle}", "FAIL", "POST /gateway/users", short(r))
@@ -250,7 +263,7 @@ async def main() -> int:
     team = (await mm.get(f"/teams/name/{env['MATTERMOST_TEAM_NAME']}")).json()
     mm_users: dict[str, dict[str, str]] = {}
     for handle in ("dev", "meera"):
-        pw = f"Woym-{handle}-Pass-1!"
+        pw = _known_human(handle).get("mm_password") or new_password(handle.capitalize())
         r = await mm.post("/users", json={"username": handle, "email": f"{handle}@woym.local", "password": pw})
         if r.status_code == 201:
             uid = r.json()["id"]

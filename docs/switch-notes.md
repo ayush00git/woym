@@ -23,6 +23,8 @@ Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** 
 | 7 | MM users dev/meera with PATs | ✅ after `PUT /api/v4/config/patch` EnableUserAccessTokens + role `system_user_access_token` |
 | 8 | Link MM account → Switch user by API | ✅ `POST /gateway/collaborations/{bridge}/identities` → 200. Afterwards `owner:true` matches Meera's messages (`addressed:true`); before linking it did not |
 | 9 | Agent reply into a human thread | ✅ `post_message(thread_id=sw_…)` lands under the Mattermost root post |
+| 10 | One agent process in two rooms | ✅ two `WsSwitchClient` objects (same credentials, one connection each, one per room): both rooms receive, posts land in the right room, the main room's claim is never taken. ❌ one connection switching rooms: with `scope=single` the side room goes deaf after switching back; with `scope=all` a concurrent post can race into the wrong room (`scripts/killtest/two_rooms.py`, `var/killtest/two_rooms.json`) |
+| 11 | `start_from=<seq>` on reconnect | ✅ **exclusive**: the event at `<seq>` is not replayed, later ones are (kt-dev: …225, …226, reconnect at …226 → only …228). Clients still drop repeated message ids as a guard |
 
 ### Surprises that matter for C and B
 - **`@name` inside `post_message` DOES address** (`addressed:true` at the target). The brief said it addresses nobody. Keep using `send_targeted` (it returns statuses), and don't put `@agent` in prose you `post()` unless you mean it.
@@ -66,27 +68,29 @@ Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** 
   - Postgres: 55432.
 - Credentials are in `infra/switch/.env`: `GATEWAY_ADMIN_EMAIL/PASSWORD`, `MATTERMOST_ADMIN_USER/PASSWORD`, `AGENT_REGISTRATION_TOKEN` (the bootstrap key, whose agents belong to a separate non-admin account, so we don't use it), and the Mattermost team `switch`.
 
-## 2. People and keys (Gateway JSON API, cookie auth) [src]
+## 2. People and keys (Gateway JSON API, cookie auth) [live]
+
+All of these ran in the kill test, setup.py and the A9 cold-stack run (§0 #1, #4, #8); the table is [live] unless a row says otherwise.
 
 | Step | Call | Notes |
 |---|---|---|
 | Log in | `POST /gateway/auth/login` `{email, password}` | Returns the `switch_auth` cookie. Use one cookie jar per user |
 | Create user (admin) | `POST /gateway/users` `{name, email, password, role:"user"}` | 409 if the email exists |
 | Mint a registration key (as that user) | `POST /gateway/api-keys` `{label}` | `{id, label, key, created_at}`. `key` is shown once. Agents registered with it are **owned by that user** |
-| Agent addressing rule (owner or admin only) | `PUT /gateway/agents/{agent_id}/addressing-policy` `{"policy": {"rules": [...]}}` or `{"policy": null}` (open) | 403 for non-owners |
+| Agent addressing rule (owner or admin only) | `PUT /gateway/agents/{agent_id}/addressing-policy` `{"policy": {"rules": [...]}}` or `{"policy": null}` (open) | 403 for non-owners (dev on Meera's agent → 403 [live]) |
 | Add agents to a room | `POST /gateway/rooms/{room_id}/agents` `{agent_ids:[...]}` | Needs room write permission |
 | Create a bridged room | `POST /gateway/rooms` `{name, description, bridge_id, agent_names, user_names, channel_type:"channel_public", internal_only:false}` | Switch creates the Mattermost channel and adds the bots and users |
 | Mattermost bridge id | `GET /gateway/collaborations` | Row with `bridge_type=="mattermost"` |
 | Link a Mattermost account to the signed-in Switch user | `POST /gateway/collaborations/{bridge_id}/identities` `{external_user_id, username, user_id:null}` | **API, not Console-only** |
 
-### Addressing rules [src] (`core/switch_core/addressing.py`)
+### Addressing rules (`core/switch_core/addressing.py`; [src] unless marked)
 - `rules: []` means open to anyone (but platform senders are always denied unless a rule has `platform:true`).
 - With rules present, deny by default: an attempt is allowed if **any** rule matches.
 - New agents start on the default policy: owner + owner's agents.
 - A rule has these fields: `rooms`, `room_groups`, `users`, `agents` (each `"*"` or a list of ids; `[]` = none), plus `owner`, `owner_agents` and `platform` (booleans).
-  - `agents` lists **agent UUIDs** (the sender agent's id).
-  - `users` lists human participant ids (`@switch-user-…:localhost`).
-  - `owner: true` matches a human only if the owner has linked that chat account (see the identities route above).
+  - `agents` lists **agent UUIDs** (the sender agent's id) [live: kt-dev's UUID admitted it].
+  - `users` lists human participant ids. Live human ids look like `@switch-mattermost-<bridge>-<username>:localhost` (§0c). Whether `users` matches that form is **unverified**: WOYM never uses a `users` rule; it uses `owner: true` instead.
+  - `owner: true` matches a human only if the owner has linked that chat account (see the identities route above) [live, §0 #8].
 - Planned policy for `@acme-env`:
   ```json
   {"policy": {"rules": [
@@ -95,7 +99,7 @@ Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** 
   ]}}
   ```
 
-## 3. Agent registration [src]
+## 3. Agent registration [live]
 
 `POST /agents` with `Authorization: Bearer <registration key>`:
 ```json
@@ -108,12 +112,12 @@ Status: **kill test ran 2026-11-05 against the live 0.31.0 stack. Result: GO.** 
 - Registering also creates a Mattermost bot whose username is the agent name.
 - `POST /agents/register-known` exists too, but only for known types (claude-code, codex, opencode…). We don't use it.
 
-## 4. Connection: WebSocket [src]
+## 4. Connection: WebSocket [live]
 
 ```
 WS /agents/{agent_id}/connection/ws
-   ?connection_id=<uuid, generated once per process, reused on reconnect>
-   &scope=single|all  &filter=all|addressed  &start_from=head|<seq>
+   ?connection_id=<uuid, generated once per CLIENT and reused on its reconnects; two clients in one process = two ids>
+   &scope=single|all  &filter=all|addressed  &start_from=head|<seq>   (<seq> is exclusive [live, §0 #11])
    &rooms=<room_id>,<room_id>   &client=woym&client_version=0.1.0
 Header: Authorization: Bearer <agent api_key>
 ```
@@ -133,18 +137,20 @@ Header: Authorization: Bearer <agent api_key>
 
 **Client → server:** `{"type": "pong", "cursor": <highest id seen>}` answers each ping. This counts as the heartbeat. Miss it and the connection lapses after 6 s TTL. Anything else sent is ignored.
 
-### `message` frame (what C's fakes should emit)
+### `message` frame (what C's fakes should emit) [live, copied from var/killtest/events.jsonl]
 ```json
-{"event": "message", "id": 4813,
- "data": {"type": "message", "room_id": "<switch room uuid>", "bridge_id": "<uuid|null>",
-          "channel_type": "channel_public", "sequence": 4813,
+{"event": "message", "id": 9007194959773701,
+ "data": {"type": "message", "room_id": "642b1f8c-5a0c-46c9-92e3-bd59b62a4246",
+          "bridge_id": "8396fa22-5003-4a9c-82aa-acffecc47287",
+          "channel_type": "channel_public", "sequence": 9007194959773701,
           "payload": {"addressed": true,
-                      "sender": "@switch-agent-ab12cd:localhost",
-                      "sender_name": "triage",
-                      "sender_kind": "platform",
-                      "on_behalf_of": "...",
-                      "message_id": "<id>", "body": "text", "timestamp": 1762350000000,
-                      "thread_id": "<root id or null>", "attachments": []}}}
+                      "sender": "@switch-agent-5cd25f69:localhost",
+                      "sender_name": "kt-dev",
+                      "sender_kind": null, "on_behalf_of": null,
+                      "message_id": "sw_f16352e38dec4a6a9f4a32f89afd2da2",
+                      "body": "@kt-meera kt plain post e7bb72", "timestamp": 1793884714851,
+                      "thread_id": null, "attachments": [],
+                      "opening_message": null, "sender_role": null}}}
 ```
 - `sender_kind` is `null` unless the Switch platform posted it [live]. Agent vs human is NOT on the event; it comes from `list_participants` (`type`), matched by **name**. Extra live keys: `opening_message`, `sender_role` (null), and `missed` on the data object.
 - `on_behalf_of` is absent unless a platform message speaks for a person.
@@ -154,7 +160,7 @@ Header: Authorization: Bearer <agent api_key>
   - `sender_id` = `sender`;
   - `sender_kind` = `"system"` if the payload says platform, else participants lookup (`agent`/`human`).
 
-## 5. Operations [src]
+## 5. Operations ([live] for the ops WOYM uses; [src] for the rest)
 
 `POST /agents/{id}/ops/{name}` with Bearer api_key and header `X-Switch-Connection-Id: <connection_id>`. The body is the raw args object. The response is `{"result": ...}`. Status codes: 404 unknown op, 400 bad args (extra keys rejected), 403 denied, 409 dead connection. The live list is `GET /agents/{id}/ops` (the kill test saves it to `var/killtest/ops.json`).
 
@@ -166,20 +172,20 @@ Header: Authorization: Bearer <agent api_key>
 | `read_context` | `limit=50, since=None, before=None, room_id=None` | `{"threads":[{"root":E,"replies":[E...]}], "truncated", "oldest_timestamp"}`, where E = `{id, kind, sender, sender_name, body, timestamp, attachments, sender_kind?}` |
 | `list_participants` | none (connected room) | `[{id, name, type, status, alias}]` |
 | `invite_agent_to_room` | `room_id, agent_name, include_subagents=false` | `{"ok": true}`; allowed if the target's policy admits you |
-| `update_agent_detail` | `agent_id, addressing=…, …` | for the owner or same-owner agents only (per brief, to be confirmed) |
+| `update_agent_detail` | `agent_id, addressing=…, …` | an agent loosening its OWN addressing → **403 [live, §0 #3b]**. Whether a same-owner agent may change another's addressing is **unverified** (the brief says yes; we never needed it) |
 
 - `thread_id` arguments may be any message in the thread; they are normalised to the root.
 - **No edit, redact or delete-message op exists.** Cards are re-posted.
 - `POST /agents/{id}/message` `{room_id, content}` posts without a connection.
 
-## 6. Mattermost (for humans.py) [assumed until the kill test]
+## 6. Mattermost (for humans.py) [live, §0 #7; used by setup.py and humans.py on every run]
 - The admin logs in with `POST /api/v4/users/login` and gets the `Token` header.
 - PATs need `PUT /api/v4/config/patch {"ServiceSettings":{"EnableUserAccessTokens":true}}` and the role `system_user system_user_access_token`. Then `POST /api/v4/users/{id}/tokens`.
 - Post as a human: `POST /api/v4/posts {channel_id, message, root_id?}` with `Bearer <PAT>`.
 
-## 7. Open questions the kill test answers
-1. Cross-owner `send_targeted`: `not_permitted` under the default rule, `live` after Meera's rule?
-2. Does a human thread reply (no mention) reach the agent, and is it `addressed`? What changes with `!follow-ups off`?
-3. Does `thread_id` on the event equal the Mattermost root post id?
-4. Does linking Meera's MM account make `owner:true` match her messages?
-5. Can an agent change its own addressing via `update_agent_detail`?
+## 7. Questions the kill test answered (all live; details in §0)
+1. Cross-owner `send_targeted`: `not_permitted` under the default rule, `live` + addressed after Meera's rule → **yes** (§0 #3).
+2. A human thread reply without a mention reaches the agent with `addressed: false`. `!follow-ups off` changes nothing because follow-ups are already off on this server (§0 #5, #5b).
+3. `thread_id` on the event is the **Switch** id (`sw_…`), **not** the Mattermost root post id (§0 #5). humans.py prints Mattermost ids; don't compare the two.
+4. After Meera links her MM account, `owner: true` matches her messages (§0 #8).
+5. An agent changing its own addressing via `update_agent_detail` → **403** (§0 #3b).

@@ -217,7 +217,9 @@ async def main(fresh_room: str | None = None, activate: bool = False, customer: 
             hu["mm_password"] = pw
         else:
             uid = check(await mm.get(f"/users/username/{h}"), f"mm user {h}")["id"]
-            hu.setdefault("mm_password", f"Woym-{h}-Pass-1!")  # created by an older setup.py
+            if not hu.get("mm_password"):  # account exists but we never stored its password: reset it
+                hu["mm_password"] = pw
+                check(await mm.put(f"/users/{uid}/password", json={"new_password": pw}), f"reset mm password {h}")
         hu["mm_user_id"] = uid
         await mm.post(f"/teams/{team['id']}/members", json={"team_id": team["id"], "user_id": uid})
         await mm.put(f"/users/{uid}/roles", json={"roles": "system_user system_user_access_token"})
@@ -391,7 +393,11 @@ async def ensure_camera(data: dict[str, Any], env: dict[str, str], team_id: str)
         uid = r.json()["id"]
     else:
         uid = check(await mm.get(f"/users/username/{CAMERA}"), "camera user")["id"]
-        pw = (data.get("camera") or {}).get("password") or "Woym-camera-Pass-1!"  # older setup.py
+        stored = (data.get("camera") or {}).get("password")
+        if stored:
+            pw = stored
+        else:  # camera exists but its password isn't stored: set a fresh random one as admin
+            check(await mm.put(f"/users/{uid}/password", json={"new_password": pw}), "reset camera password")
     await mm.post(f"/teams/{team_id}/members", json={"team_id": team_id, "user_id": uid})
     extra = [data["rooms"][k]["channel_id"] for k in (data.get("camera") or {}).get("extra_rooms", [])
              if k in (data.get("rooms") or {})]

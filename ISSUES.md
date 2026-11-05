@@ -517,3 +517,29 @@ EOF
 - **Evidence:** demo.py timelines (local captures; take-905's is in media/raw), and the sandbox reports to the lead.
 - **Impact:** none; this gives the blog and README a source for each number.
 - **Workaround / next step:** agents (C) cite this entry from docs/drafts/blog.md.
+
+## [2026-11-05 19:51 IST] platform (switch-ba) | Narration for human recordings, switch-notes sweep, no predictable passwords, take-904 audit
+- **Status:** fixed
+- **What happened:**
+  1. **mix_narration.py takes what a person records:** beat-NN or beat-N in .wav/.m4a/.mp3/.ogg/.opus/.flac/.aac/.webm/.mp4, any rate, mono or stereo. It converts to 48 kHz mono and trims silence before and after (0.15 s kept; `--keep-silence` turns that off).
+     - Messages are plain words, e.g. "✗ Beat 16: the recording is 5.3 s (after trimming 1.7 s of silence), but the beat is only 4 s. It's 1.3 s too long and would run past the end of the video. Re-record it about 1.8 s shorter (the script line has 8 words), or ask for a longer beat."
+     - Two recordings for one beat → "Keep one."
+     - Tested with an m4a (AAC stereo 44.1k), mp3 (22.05k mono), ogg (vorbis stereo), wav (16k), flac and opus. Mixed result: -16.0 LUFS. Two bugs found in my own test and fixed: `--placeholders` deleted the placeholders it had just written; an all-silent file trimmed to nothing made ffprobe return "N/A". media/raw/vo/ is back to SILENT placeholders.
+  2. **docs/switch-notes.md:** all 9 of C's C13 findings applied.
+     - §7 now lists answers with §0 pointers (thread_id is `sw_…`; self-addressing → 403).
+     - §6 is [live]; §5 update_agent_detail says self → 403 live, same-owner unverified.
+     - §4 frame example copied from a real kill-test event; start_from documented as exclusive (live).
+     - connection_id is per client; the `users` id form is marked unverified; §2/§3 retagged [live].
+     - New §0 rows: #10 two rooms, #11 start_from.
+  3. **Predictable passwords gone** (B's audit #6). killtest.py now reuses setup's stored passwords or `new_password()`. setup.py's `Woym-<h>-Pass-1!` / `Woym-camera-Pass-1!` fallbacks are replaced by an admin reset to a fresh random password when an account exists without a stored one. `make setup` rc=0 after the change.
+  4. **take-904 audit:** nothing in the cut, docs or README uses take-904 footage or numbers. build_rough_cut.py reads take-905 and take-epi-2 only. Run times quoted anywhere come from demo.py's own clock, not video length.
+- **Evidence:** this session's runs; grep for take-904 over scripts/video, docs, README.md, media/*.html → no hits.
+- **Impact:** none outstanding.
+- **Workaround / next step:** none.
+
+## [2026-11-05 19:52 IST] agents (switch-90) | Update to "WS resume cursor may replay an event": start_from is exclusive (verified live by platform)
+- **Status:** fixed (the concern doesn't apply)
+- **What happened:** Platform verified live that `start_from=<seq>` is EXCLUSIVE: a kt-dev reconnect at …226 received only …228 (docs/switch-notes.md §0 #11, §4). So a reconnect doesn't replay the last event, and the scenario in my earlier entry ("WS resume cursor may replay an event") doesn't happen with Switch 0.31.0.
+- **Evidence:** platform's message and switch-notes §0 #11.
+- **Impact:** none. The message-id dedupe in woym/agents/base.py:Agent.handle stays as a cheap guard (e.g. a restarted process), and docs/switch-usage.md now says [live-verified] for the cursor.
+- **Workaround / next step:** none.
