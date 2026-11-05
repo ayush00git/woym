@@ -20,7 +20,7 @@ def test_run_roundtrip_through_tag():
     _, _, kv = tags.parse(tags.tag(1, Step.SANDBOX_RUN, **wire.run_kv("f_", r)))
     back = wire.run_from("f_", kv, VENDOR_ENV, "vendor-sandbox")
     assert (back.passed, back.actual, back.expected, back.exit_code, back.duration_s) == \
-        (False, r.actual, r.expected, 1, 1.23)
+        (False, r.actual, r.expected, 1, 0.0)
 
 
 def test_missing_fields_raise():
@@ -42,3 +42,15 @@ def test_matrix_envs_dedupes():
     envs = matrix_envs(VENDOR_ENV, c)
     assert len(envs) == 4 and envs[0] == VENDOR_ENV and envs[2] == c
     assert len(matrix_envs(VENDOR_ENV, VENDOR_ENV)) == 2
+
+
+def test_run_kv_drops_implied_fields():
+    from woym.sandbox.runner import EXPECTED
+    ok = RunResult(VENDOR_ENV, True, EXPECTED, EXPECTED, 0, 2.5, "", "vendor-sandbox")
+    assert wire.run_kv("", ok) == {"passed": True, "actual": EXPECTED}
+    assert wire.run_kv("", ok, dur=True)["dur"] == "2.5"
+    odd = RunResult(VENDOR_ENV, False, "other", "x", 3, 0, "", "vendor-sandbox")
+    kv = {k: tags._encode(v) for k, v in wire.run_kv("", odd).items()}
+    back = wire.run_from("", {k: v for k, v in tags.parse(tags.tag(1, Step.SANDBOX_RUN, **wire.run_kv("", odd)))[2].items()},
+                         VENDOR_ENV, "x")
+    assert (back.expected, back.exit_code) == ("other", 3) and kv["exit"] == "3"

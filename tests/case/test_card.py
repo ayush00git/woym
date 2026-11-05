@@ -142,3 +142,16 @@ def test_bisect_pair_culprit_marks_both_rows():
     body = rows(t)[1:]
     assert sum("CULPRIT (pair)" in b for b in body) == 2
     assert "Pairs tried: `lang+tz` ❌" in t
+
+
+def test_no_card_mentions_an_agent():
+    """Live Switch: '@name' in any agent post addresses that participant."""
+    import re
+    f = FixResult("fix/case-1", "0123456789abcdef", ["src/index.js"], "t", "claude", "s")
+    cards = _all_cards() + [
+        card.not_reproduced(1, run(VENDOR, True)), card.reproduced(1, run(VENDOR, False)), card.fix(1, f),
+        card.fixed(1, "abc", run(CUSTOMER, True), "meera"), card.failed(1, "why"),
+    ]
+    for t in cards:
+        assert not re.search(r"@(triage|runner|fixer|acme-env)\b", t), t
+        assert not re.search(r"@\w", t.replace("@meera", "")), t   # only the human ping

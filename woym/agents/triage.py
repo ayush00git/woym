@@ -63,9 +63,10 @@ class TriageAgent(Agent):
         if event.sender_kind != "human":
             return
         mentioned = event.addressed or MENTION in event.text.lower()
-        if not mentioned:
-            return
         thread_case = self.store.by_thread(event.room_id, event.thread_id) if event.thread_id else None
+        patch_in_thread = thread_case is not None and PATCH_RE.search(event.text) is not None
+        if not (mentioned or patch_in_thread):
+            return
         is_vendor = self._is_human(event, self.vendor_human)
         is_customer = self._is_human(event, self.customer_human)
 
@@ -120,7 +121,7 @@ class TriageAgent(Agent):
         self.store.save(case)
 
         if "error" in kv:
-            await self._fail(case, f"@{event.sender_name} reported an error at `{step.value}`: {kv['error']}")
+            await self._fail(case, f"{event.sender_name} reported an error at `{step.value}`: {kv['error']}")
             return
         handler = {
             Step.SANDBOX_RUN: self._on_sandbox_run,
@@ -146,7 +147,7 @@ class TriageAgent(Agent):
         else:
             self._advance(case, Step.REPRODUCED)
             await self.say(case.room_id, case.thread_id,
-                           card.reproduced(case.id, run) + f"\n_@{self.vendor_human}: say `@triage patch it` to fix._")
+                           card.reproduced(case.id, run) + f"\n_@{self.vendor_human}: reply **patch it** in this thread to fix._")
 
     async def _on_consent(self, case: Case, kv: dict[str, str]) -> None:
         if state.can_advance(case.step, Step.CONSENT_PENDING):
@@ -202,7 +203,7 @@ class TriageAgent(Agent):
         if over.passed and not real.passed and not vendor_fail.passed:
             self._advance(case, Step.CONFIRMED_BOTH)
             await self.say(case.room_id, case.thread_id,
-                           text + f"\n\n_@{self.vendor_human}: say `@triage patch it` to have @fixer write the fix._")
+                           text + f"\n\n_@{self.vendor_human}: reply **patch it** in this thread to have fixer write the fix._")
         else:
             await self.say(case.room_id, case.thread_id, text)
             await self._fail(case, "The customer-machine runs did not confirm the sandbox bisect.")
@@ -217,7 +218,7 @@ class TriageAgent(Agent):
         self._advance(case, Step.FIX_REQUESTED)
         await self._hop_out(case, Step.FIX_REQUESTED, config.AGENT_FIXER,
                             f"Write a failing test and a fix for case #{case.id} (culprit {culprit}).",
-                            culprit=culprit, **wire.env_kv("c_", failing.env), **wire.run_kv("f_", failing))
+                            culprit=culprit, value=getattr(failing.env, culprit.split("+")[0]), **wire.run_kv("f_", failing))
 
     async def _on_fix(self, case: Case, kv: dict[str, str]) -> None:
         fix = FixResult(branch=kv.get("branch", ""), sha=kv.get("sha", ""), files_changed=tags.as_list(kv.get("files")),
@@ -236,7 +237,7 @@ class TriageAgent(Agent):
         self._advance(case, Step.MATRIX_GREEN)
         self._advance(case, Step.VERIFY_REQUESTED)
         await self._hop_out(case, Step.VERIFY_REQUESTED, config.AGENT_CUSTOMER,
-                            f"Please install bizclock @ {case.fix.sha[:10]} and re-run the original repro.",
+                            f"Please install bizclock at {case.fix.sha[:10]} and re-run the original repro.",
                             sha=case.fix.sha)
 
     async def _on_fixed(self, case: Case, kv: dict[str, str]) -> None:
@@ -262,7 +263,7 @@ class TriageAgent(Agent):
         statuses = await self.send(case.room_id, case.thread_id, to, case.id, step, prose, **kv)
         if statuses is not None and statuses.get(to, "live") != "live":
             await self.say(case.room_id, case.thread_id,
-                           f"⚠️ @{to} is `{statuses.get(to)}` for `{step.value}`; the case is waiting on it.")
+                           f"⚠️ {to} is `{statuses.get(to)}` for `{step.value}`; the case is waiting on it.")
 
     async def _fail(self, case: Case, why: str) -> None:
         if state.can_advance(case.step, Step.FAILED):

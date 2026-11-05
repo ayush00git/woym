@@ -29,7 +29,9 @@ class FixerAgent(Agent):
             return
         room, thread = event.room_id, event.thread_id
         culprit = kv.get("culprit", "")
-        env = wire.env_from("c_", kv)
+        # the failing run is the vendor env with only the culprit flipped
+        env = config.VENDOR_ENV.with_value(culprit, kv.get("value", "")) if culprit in config.VENDOR_ENV.as_dict() \
+            else config.VENDOR_ENV
         failing = wire.run_from("f_", kv, env, "vendor-sandbox")
         mode = getattr(self.fixer, "mode", "?")
         who = "Claude Code (`claude -p`)" if mode == "claude" else "the stored FIXTURE patch (replayed, not generated)"
@@ -63,7 +65,7 @@ class FixerAgent(Agent):
 
         await self.send(
             room, thread, config.AGENT_TRIAGE, case_id, Step.FIX_PUSHED,
-            f"Pushed {result.branch} @ {result.sha[:10]} ({result.mode}).",
+            f"Pushed {result.branch} at {result.sha[:10]} ({result.mode}).",
             branch=result.branch, sha=result.sha, files=result.files_changed, test=result.test_name,
             mode=result.mode, summary=result.summary,
         )

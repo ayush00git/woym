@@ -7,12 +7,22 @@ filter=all), with addressed=True only for send_targeted targets.
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import dataclass, field
 
 from woym.case.state import SendGuard
 from woym.contracts import BisectReport, BisectStep, Env, FixResult, MessageEvent, Participant, RunResult
 
 EXPECTED = "cutoff=Fri 17:30 payout=Fri"
+# Live Switch: an "@name" in ANY agent post addresses that participant, and an
+# agent whose policy refuses the sender posts a visible refusal. Agents may only
+# @-mention humans (deliberate pings), never agents.
+AGENT_MENTION = re.compile(r"@(triage|runner|fixer|acme-env)\b")
+
+
+def assert_no_agent_mention(sender, text):
+    m = AGENT_MENTION.search(text)
+    assert m is None, f"{sender} posted an @agent mention {m.group(0)!r}:\n{text}"
 BAD = "cutoff=Mon 17:00 payout=Mon"
 FIX_SHA = "f1" * 20
 
@@ -101,9 +111,11 @@ class FakeClient:
         raise NotImplementedError
 
     async def post(self, room_id, text, thread_id=None):
+        assert_no_agent_mention(self.name, text)
         return self.bus._emit(self.name, "agent", text, thread_id).id
 
     async def send_targeted(self, room_id, targets, text, thread_id=None):
+        assert_no_agent_mention(self.name, text)
         self.bus._emit(self.name, "agent", text, thread_id, targets)
         return {t: self.bus.statuses.get(t, "live") for t in targets}
 

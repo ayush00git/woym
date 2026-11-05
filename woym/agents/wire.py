@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from woym.case import tags
 from woym.contracts import ENV_KEYS, Env, RunResult
+from woym.sandbox.runner import EXPECTED  # the repro's correct answer, same for every env
 
 
 def env_kv(prefix: str, env: Env) -> dict[str, str]:
@@ -22,30 +23,34 @@ def env_from(prefix: str, kv: dict[str, str]) -> Env:
         raise ValueError(f"missing env field {e.args[0]!r}") from None
 
 
-def run_kv(prefix: str, run: RunResult) -> dict[str, object]:
-    return {
-        f"{prefix}passed": run.passed,
-        f"{prefix}actual": run.actual,
-        f"{prefix}expected": run.expected,
-        f"{prefix}exit": run.exit_code,
-        f"{prefix}dur": f"{run.duration_s:.2f}",
-    }
+def run_kv(prefix: str, run: RunResult, dur: bool = False) -> dict[str, object]:
+    """Only what isn't implied: `expected` is dropped when it is the standard
+    repro answer, `exit` when it is the usual 0/1 for pass/fail."""
+    kv: dict[str, object] = {f"{prefix}passed": run.passed, f"{prefix}actual": run.actual}
+    if run.expected != EXPECTED:
+        kv[f"{prefix}expected"] = run.expected
+    if run.exit_code != (0 if run.passed else 1):
+        kv[f"{prefix}exit"] = run.exit_code
+    if dur:
+        kv[f"{prefix}dur"] = f"{run.duration_s:.1f}"
+    return kv
 
 
 def run_from(prefix: str, kv: dict[str, str], env: Env, where: str) -> RunResult:
     try:
-        return RunResult(
-            env=env,
-            passed=bool(tags.as_bool(kv[f"{prefix}passed"])),
-            expected=kv.get(f"{prefix}expected", ""),
-            actual=kv.get(f"{prefix}actual", ""),
-            exit_code=int(kv.get(f"{prefix}exit", "0")),
-            duration_s=float(kv.get(f"{prefix}dur", "0")),
-            log_tail="",
-            where=where,
-        )
+        passed = bool(tags.as_bool(kv[f"{prefix}passed"]))
     except KeyError as e:
         raise ValueError(f"missing run field {e.args[0]!r}") from None
+    return RunResult(
+        env=env,
+        passed=passed,
+        expected=kv.get(f"{prefix}expected", EXPECTED),
+        actual=kv.get(f"{prefix}actual", ""),
+        exit_code=int(kv.get(f"{prefix}exit", "0" if passed else "1")),
+        duration_s=float(kv.get(f"{prefix}dur", "0")),
+        log_tail="",
+        where=where,
+    )
 
 
 def results_kv(results: dict[str, bool]) -> str:

@@ -44,7 +44,7 @@ def not_reproduced(case_id: int, run: RunResult) -> str:
     return "\n".join(
         [
             _header(PASS, "NOT REPRODUCED in vendor sandbox", case_id),
-            f"Repro **passed** on {_code(f'node {e.node} · {e.os} · {e.lang} · TZ={e.tz} · bizclock@{e.bizclock}')} "
+            f"Repro **passed** on {_code(f'node {e.node} · {e.os} · {e.lang} · TZ={e.tz} · bizclock {e.bizclock}')} "
             f"in {run.duration_s:.1f}s.",
             f"Got {_code(run.actual)} · expected {_code(run.expected)}",
             "_Works on our machine. Asking the customer's agent for their environment._",
@@ -187,7 +187,7 @@ def fix(case_id: int, result: FixResult) -> str:
     return "\n".join(
         [
             _header("🛠️", "Fix pushed", case_id, mode),
-            f"{_code(result.branch)} @ {_code(result.sha[:10])} · test {_code(result.test_name)}",
+            f"{_code(result.branch)} at {_code(result.sha[:10])} · test {_code(result.test_name)}",
             f"Files: {files}",
             f"> {_cell(result.summary)}",
         ]
@@ -217,7 +217,7 @@ def fixed(case_id: int, sha: str, run: RunResult, customer: str) -> str:
     return "\n".join(
         [
             f"### {PASS} FIXED ON {customer.upper()}'S MACHINE · case #{case_id}",
-            f"Installed bizclock @ {_code(sha[:10])} and re-ran the original repro: "
+            f"Installed bizclock {_code(sha[:10])} and re-ran the original repro: "
             f"{_code(run.actual)} · exit {run.exit_code}",
             f"_Posted by the customer's own agent, from the customer's machine._",
         ]
@@ -241,7 +241,7 @@ def consent_prompt(case_id: int, customer: str, values: dict[str, str], requeste
     return "\n".join(
         [
             f"#### 🔐 @{customer}, can I share this? · case #{case_id}",
-            f"`@{requester}` (vendor) asked for {len(values)} environment facts. Exactly these values would be sent:",
+            f"{requester} (vendor agent) asked for {len(values)} environment facts. Exactly these values would be sent:",
             "",
             *rows,
             "",

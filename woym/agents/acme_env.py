@@ -98,7 +98,7 @@ class AcmeEnvAgent(Agent):
                 room, thread, case_id, Step.CONFIRMED_BOTH,
                 f"On this machine: {key}={value} → {_pf(over.passed)}, as-is → {_pf(real.passed)}.",
                 key=key, value=value, override_pass=over.passed, real_pass=real.passed,
-                override_actual=over.actual, real_actual=real.actual, real_value=getattr(real.env, key, ""),
+                override_actual=over.actual, real_actual=real.actual,
             )
 
         elif step == Step.VERIFY_REQUESTED:
@@ -112,7 +112,7 @@ class AcmeEnvAgent(Agent):
                 st.pending.append(_Pending("install", req, sha))
                 await self.say(room, thread, "\n".join([
                     f"#### 🔐 @{self.customer}, install the fix? · case #{case_id}",
-                    f"`@{config.AGENT_TRIAGE}` asks me to install bizclock @ `{sha[:10]}` (branch from the vendor) "
+                    f"{config.AGENT_TRIAGE} (vendor agent) asks me to install bizclock `{sha[:10]}` (a fix branch from the vendor) "
                     "on this machine and re-run the original repro once.",
                     "**Reply `yes` in this thread** to allow, or `no` to refuse.",
                 ]))
@@ -165,7 +165,7 @@ class AcmeEnvAgent(Agent):
             text = card.fixed(case_id, sha, run, self.customer)
         else:
             text = (f"#### ❌ Still failing on {self.customer}'s machine · case #{case_id}\n"
-                    f"bizclock @ `{sha[:10]}` gives `{run.actual}` (expected `{run.expected}`).")
+                    f"bizclock `{sha[:10]}` gives `{run.actual}` (expected `{run.expected}`).")
         await self.announce(room, thread, case_id, Step.FIXED_ON_CUSTOMER, text,
                             passed=run.passed, actual=run.actual, sha=sha)
 

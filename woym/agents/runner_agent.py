@@ -50,7 +50,7 @@ class RunnerAgent(Agent):
                 await reply(step, "Sandbox error: the run did not complete.", error=_err(e))
                 return
             verdict = "passed" if r.passed else "FAILED"
-            await reply(step, f"Repro {verdict} in the vendor sandbox: {r.actual}.", **wire.run_kv("", r))
+            await reply(step, f"Repro {verdict} in the vendor sandbox: {r.actual}.", **wire.run_kv("", r, dur=True))
 
         elif step == Step.BISECTING:
             vendor, customer = wire.env_from("v_", kv), wire.env_from("c_", kv)
@@ -83,7 +83,7 @@ class RunnerAgent(Agent):
             ok = sum(r.passed for r in results)
             green = bool(results) and ok == len(results)
             await reply(step, f"Matrix at {ref[:10]}: {ok}/{len(results)} green.",
-                        green=green, ok=ok, n=len(results), ref=ref)
+                        green=green, ok=ok, n=len(results))
 
 
 def _err(e: Exception) -> str:

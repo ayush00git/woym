@@ -67,7 +67,7 @@ async def test_m1_flow_to_confirmed_both(tmp_path):
     assert c.customer_env == w.machine.env
     assert c.bisect.culprits == ["tz"]
     text = w.bus.texts()
-    for s in ("Suspect lineup", "Bisect", "← CULPRIT", "CONFIRMED ON BOTH MACHINES", "@triage patch it"):
+    for s in ("Suspect lineup", "Bisect", "← CULPRIT", "CONFIRMED ON BOTH MACHINES", "reply **patch it**"):
         assert s in text
     assert ("run_repro", {"tz": "UTC"}) in w.machine.calls and ("run_repro", None) in w.machine.calls
     # every agent message is in the case thread
@@ -222,3 +222,19 @@ async def test_two_cases_are_independent(tmp_path):
     await w.report(who="dev")
     assert len(w.store.all()) == 2
     assert w.case().thread_id != first and w.case().step == Step.CONSENT_PENDING
+
+
+async def test_dev_patch_reply_in_thread_without_mention(tmp_path):
+    w = World(tmp_path, ask_before_install=False)
+    await to_confirmed(w)
+    await w.say("dev", "patch it")              # thread reply, addressed:false live, no @triage
+    assert w.case().step == Step.FIXED_ON_CUSTOMER
+
+
+async def test_unrelated_thread_chatter_is_ignored(tmp_path):
+    w = World(tmp_path)
+    await to_confirmed(w)
+    n = len(w.bus.log)
+    await w.say("dev", "looks good")
+    await w.say("meera", "thanks all")
+    assert len(w.bus.log) == n + 2 and w.case().step == Step.CONFIRMED_BOTH
