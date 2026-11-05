@@ -77,6 +77,9 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **A8 Recorder.** `scripts/record.py` records the Mattermost room and the case thread at 1920×1080 to `media/raw/take-<n>.webm` while `scripts/demo.py` runs. It only reads, and follows the live lock.
 
+- **A9 Cold-stack test.** Done: wipe → up 12 s → setup 7 s → demo FIXED 28.7 s, with zero human steps.
+- **A10 Epilogue setup** (WOYM_KNOWN): third owner kiran, agent nepal-env, room acme-nepal (not activated), kiran's rule admitting only triage. Verify read_context `sender` == live sender_id for agent posts.
+
 ### B: Sandbox (switch-7c)
 - **B1 bizclock** in `fixtures/bizclock/`:
   - a zero-dependency Node package `bizclock` with `nextCutoff()` containing the whole-hour rounding bug (`docs/contracts.md` §5);
@@ -119,6 +122,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
   - `blog.md`: a build log that teaches Switch (Best Blog is judged on clarity, accuracy and help to a first-time user), with `[TODO: live result]` markers instead of made-up numbers;
   - `howiswitch.md`: social post variants.
 
+- **B14 Epilogue laptop + demo beat** (WOYM_KNOWN): a `kiran-laptop` container (TZ=Asia/Kathmandu, order 17:20) and `demo.py --epilogue` (Kiran's report → yes → wait for the KNOWN card).
+
 ### C: Agents (switch-90)
 - **C1 Case core** in `woym/case/`:
   - `tags.py`: parse and format the wire tag;
@@ -140,6 +145,9 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **C5 Switch usage map.** `docs/switch-usage.md`: each Switch feature we use, with file:function, its role in the demo, what breaks without it, and whether it's [live-verified] or [fake-tested]. Folded into the README.
 
+- **C9 Known-culprits epilogue.** Done: flag-gated, with evidence re-read from room history and checked for Switch attribution.
+- **C10** Known-path consent wording; `MultiRoomClient` (two connections in one process, verified live by A) for WOYM_KNOWN=1 only.
+
 ### Lead (switch-b6)
 - Scaffold, contracts, config, Makefile, commits after every reviewed unit.
 - Integration: wire the real client into the agents. **M1 end to end on Nov 6 by 18:00.**
@@ -155,7 +163,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 | Nov 6, 18:00 | **M1**: report → NOT REPRODUCED → consent → lineup → bisect → CONFIRMED BOTH, in real Mattermost | **Done Nov 5, 18:55 IST**: live in 15.7 s |
 | Nov 6, 23:59 | **M2**: fix → matrix → FIXED ON MEERA'S MACHINE | **Done Nov 5, 18:59 IST** with the fixture fixer: live in 28.6 s. Claude-mode live run pending |
 | Nov 7, 10:00 | Cut M2 if it isn't solid. Fresh-clone test | |
-| Nov 7, 13:00–18:00 | Record and cut the video; README, blog, #HowISwitch | |
+| Nov 7, 13:00–18:00 | Record and cut the video; README, blog, #HowISwitch | **Main footage recorded Nov 5, 19:17 IST** (take-905, claude fixer, FIXED in 57 s). Cut and narration pending |
 | Nov 7, 21:00 | The user submits | Hard deadline 23:59 |
 
 ## 6. Working rules
