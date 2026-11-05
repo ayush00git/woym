@@ -406,3 +406,17 @@ EOF
 - **Impact:** C's epilogue and B's demo --epilogue can run live.
 - **Workaround / next step:** to test humans.py, I posted 2 lines as kiran in acme-nepal and deleted them in Mattermost (DELETE /posts → 200). Switch may still list them in acme-nepal's read_context history (not checked). Agent-to-agent addressing inside acme-nepal isn't exercised live yet; it uses the same rule mechanism the kill test proved.
 - **C's assumption 4 (agent `sender` in read_context == live event sender):** YES, from the kill test (var/killtest/read_context.json vs events.jsonl, kt-dev and kt-meera). Written up in docs/switch-notes.md §0c.
+
+## [2026-11-05 19:26 IST] sandbox (switch-7c) | reset.sh killed a live sandbox run that belonged to someone else
+- **Status:** fixed
+- **What happened:** While testing B14, `scripts/reset.sh` step 2 ran `docker rm -f` on every `woym-run-*` container. One of them was still running, started by another session's process (the rm took 24.7 s, so it was a live kill, not a leftover). That run would have failed as a sandbox error or exit 137.
+- **Evidence:** reset output "remove leftover sandbox runs  removed 1 (24654 ms)" at about 19:31 IST.
+- **Impact:** any concurrent DockerSandbox user (tests, a demo in another shell, the fresh-clone test) could be broken by a reset. Agents (C) were notified to re-run anything that failed around 19:31.
+- **Workaround / next step:** fixed. Every sandbox container now carries the labels `woym.owner_pid=<pid>` and `woym.root=<checkout>`. reset removes only containers from this checkout whose owner pid is dead. Verified: an orphan (dead pid) was removed; a live-owner run and another checkout's run were kept.
+
+## [2026-11-05 19:28 IST] lead | Commit 90f3fba landed although its pre-commit run showed 1 failure (lead gate bug); failure did not reproduce
+- **Status:** open (intermittent test not identified); the gate is fixed
+- **What happened:** The lead verified C10 in a clean worktree, but the test command ran in a subshell followed by `;`, so the commit ran regardless of the result. That run reported "1 failed, 240 passed, 1 skipped". Two later runs of the exact committed HEAD in clean worktrees passed 241/241. The failing test's name wasn't captured.
+- **Evidence:** Lead's shell output for the C10 commit (65 s run, "1 failed"); re-runs at HEAD 90f3fba: "241 passed, 1 skipped" twice. Other sessions were using Docker at the time (kiran-laptop and acme-laptop running; A cutting video).
+- **Impact:** There's probably an intermittent, timing-sensitive test, likely Docker or poll-interval bound under load. A judge running `make test` could see a spurious failure.
+- **Workaround / next step:** The lead now commits only when the test output contains no "failed", and prints the FAILED lines. Coworkers are asked to report any intermittent test they see; next time it fails, the test name gets logged here.
