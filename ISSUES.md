@@ -325,3 +325,29 @@ EOF
 - **Impact:** setup is idempotent. Every gateway user, agent and room reported "ok (kept)", and addressing rules, identity links, display names, avatars and the camera user were re-applied with the same values. No live lock was held, or setup would have refused. No demo or recording was running at that moment as far as the lead can tell. Coworkers have been told to check their state.
 - **Root cause:** Free text containing backticks, written in an unquoted heredoc.
 - **Workaround / next step:** The lead now always uses a quoted heredoc (`<<'EOF'`) for log text and adds the timestamp separately with printf. Coworkers have been told the same.
+
+## [2026-11-05 19:12 IST] sandbox (switch-7c) | An extra Claude fixer run was spent before the lead approved the combined take
+- **Status:** fixed (process)
+- **What happened:** I proposed making the Claude re-verification run the recorded final take (one model call). Before the lead's approval reached me, I read "after B12 and the live Claude run" in the B13 message as a go and ran `demo.py --fixer claude` at 19:10:39 IST. So one extra `claude -p` call ran on the user's plan ($0.08 per fixer_agent.log). The final recorded take still needs its own call.
+- **Evidence:** var/logs/fixer_agent.log "claude -p took 30.4s, $0.08"; the lead's approval message arrived after the run.
+- **Impact:** $0.08 and about 1 min. The run itself is useful: Claude PASSED the tightened gate (test fails on the old code in UTC and IST), no fallback, FIXED at 57.4 s, commit 8b7b684.
+- **Workaround / next step:** while a proposal of mine is pending, I wait for an explicit go before spending model calls.
+
+## [2026-11-05 19:13 IST] platform (switch-ba) | Review fixes 1-5 from C (cold-stack safety)
+- **Status:** fixed (unit-tested); setup paths to be proven by A9 cold-stack test
+- **What happened:** C's review found 5 issues in my code.
+  1. Stale caches after a wipe: setup now records a stack fingerprint (Mattermost bridge id + Gateway user ids). When it changes, every cached id, key, token, room and participant id is dropped. Credentials without a fingerprint get one rebuilt from room.bridge_id + humans.*.switch_user_id, so a warm stack is NOT wiped. A rejected registration key (401) or Mattermost token is re-minted.
+  2. Cold stack, no human messages yet: if a human's sender id isn't in the room history, setup posts one hello as that human via their token ("👋 meera from Acme here. acme-env is my agent.") and reads the id from it.
+  3. `start_from` is EXCLUSIVE [live]: kt-dev in Town Square got ids …225, …226, then reconnected with start_from=…226 and received only …228 (posted while offline). The client also drops repeated message ids (last 1000) as a guard.
+  4. creds.save uses tempfile.mkstemp in the same dir (0600 from creation) + os.replace.
+  5. New Gateway/Mattermost/camera users get random passwords stored in credentials.json (humans.<h>.switch_password / mm_password, camera.password). Users made by older setup keep their known passwords.
+- **Evidence:** tests/switch (12 pass); cursor test script output in this session.
+- **Impact:** a judge's `make down -v && make up && make setup` no longer trips on stale credentials.
+- **Workaround / next step:** A9 cold-stack run.
+
+## [2026-11-05 19:13 IST] lead | One extra Claude run spent because of an ambiguous lead message
+- **Status:** fixed (process)
+- **What happened:** The lead's message to sandbox ("after B12 and the live Claude run") read as a go for the queued Claude re-verification, while a proposal to merge it into the recorded final take was still pending. Sandbox started the run at 19:10:39, before the lead's approval of the merge arrived, so one extra `claude -p` call was spent on the user's plan.
+- **Evidence:** var/logs/fixer_agent.log: "claude -p took 30.4s, $0.08" (cost as reported by the CLI's JSON output).
+- **Impact:** Small plan usage. The run was useful: it verified the stricter fixer gate live (PASS, no fallback).
+- **Workaround / next step:** While a proposal is pending, coworkers wait for an explicit "go", and the lead words run instructions explicitly.

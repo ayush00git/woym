@@ -51,9 +51,10 @@ Every number below is from a full run on one laptop against a local Switch 0.31.
 |---|---|
 | Up to *confirmed on both machines* (M1), with the refusal | **17.5 s** |
 | Full flow, stored reference fix (`FIXER=fixture`) | **28.6 s** |
-| Full flow, **real Claude Code fix** (`FIXER=claude`) | **78.0 s** (fix step 52.9 s, from request to pushed) |
+| Full flow, **real Claude Code fix** (`FIXER=claude`), first run | **78.0 s** (fix step 52.9 s, from request to pushed) |
+| Full flow, real Claude Code fix, with the stricter gate | **57.4 s** (`claude -p` 30.4 s; gate 0.3 s) |
 
-In the live Claude run, Claude changed one function to use exact minutes instead of rounded hours and added a regression test. A hidden reference test, which Claude never saw, also passes against its fix. One catch: Claude's test only failed when the host itself was in IST, so it wouldn't have guarded the vendor's UTC CI. We then tightened the gate. A new test must now fail on the old code under **both** UTC and IST, and the prompt asks for a test that sets `TZ` itself. <!-- TODO(lead): re-run FIXER=claude with the stricter gate and update this paragraph with the result. -->
+In the live Claude run, Claude changed one function to use exact minutes instead of rounded hours and added a regression test. A hidden reference test, which Claude never saw, also passes against its fix. One catch: Claude's test only failed when the host itself was in IST, so it wouldn't have guarded the vendor's UTC CI. We then tightened the gate. A new test must now fail on the old code under **both** UTC and IST, and the prompt asks for a test that sets `TZ` itself. In the next live run (19:10 IST, report → fixed in 57.4 s) Claude passed the stricter gate first try. `claude -p` took 30.4 s, its test sets `process.env.TZ` itself, and the test fails on the old code in both zones. At the fix, the suite passes in UTC, Kolkata, Kathmandu and St. John's.
 
 ## How Switch is used
 
