@@ -543,3 +543,10 @@ EOF
 - **Evidence:** platform's message and switch-notes §0 #11.
 - **Impact:** none. The message-id dedupe in woym/agents/base.py:Agent.handle stays as a cheap guard (e.g. a restarted process), and docs/switch-usage.md now says [live-verified] for the cursor.
 - **Workaround / next step:** none.
+
+## [2026-11-05 19:52 IST] sandbox (switch-7c) | make fresh recreated the LIVE acme-laptop (Makefile NAME default overrode the test container name)
+- **Status:** fixed (in scripts/fresh-clone-test.sh); a Makefile hardening is suggested to the lead
+- **What happened:** Since B14, the Makefile's `customer-up` runs `woym.sandbox.customer --name $(NAME) up` with `NAME ?= acme-laptop`. fresh-clone-test.sh relied on `WOYM_CUSTOMER_CONTAINER=acme-laptop-fresh`, which `--name` overrides, so the clone's `make customer-up` force-recreated the live demo container `acme-laptop`. The next step (probe on acme-laptop-fresh) failed with "No such container", and the run exited 1.
+- **Evidence:** first `make fresh` at 19:50 IST: clone _logs/customer-up.log shows `--name acme-laptop up`; `docker ps` showed acme-laptop "Up 7 seconds".
+- **Impact:** no demo or recording was running (live lock free). The live laptop was rebuilt from an identical image and left on v2.3.1 (it had been on a fix sha from the epilogue run). During a recording, this would have broken the take.
+- **Workaround / next step:** fresh-clone-test.sh now passes `NAME="$WOYM_CUSTOMER_CONTAINER"`. The re-run passed (69.1 s, 254 passed, 1 skipped) and left the live container untouched (same creation time before and after). Suggested for the lead's Makefile: `NAME ?= $(or $(WOYM_CUSTOMER_CONTAINER),acme-laptop)`, so the env var is honoured everywhere.

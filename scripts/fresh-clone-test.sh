@@ -73,7 +73,8 @@ done
 run sync        make sync
 run test        make test
 run images      make images
-run customer-up make customer-up
+# NAME must be passed: the Makefile defaults it to acme-laptop, which is the live demo container
+run customer-up make customer-up NAME="$WOYM_CUSTOMER_CONTAINER"
 # The customer laptop must report exactly the demo facts.
 run probe       sh -c 'out="$(uv run python -m woym.sandbox.customer probe)" && echo "$out" &&
   [ "$out" = '"'"'{"node": "20", "lang": "en_IN.UTF-8", "os": "bookworm", "bizclock": "v2.3.1", "tz": "Asia/Kolkata"}'"'"' ]'

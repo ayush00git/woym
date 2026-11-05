@@ -45,7 +45,7 @@ demo-epilogue:
 images:
 	./scripts/pull-images.sh
 
-NAME ?= acme-laptop
+NAME ?= $(or $(WOYM_CUSTOMER_CONTAINER),acme-laptop)
 
 customer-up:
 	uv run python -m woym.sandbox.customer --name $(NAME) up
