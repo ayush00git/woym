@@ -249,3 +249,24 @@ EOF
 - **Evidence:** I re-checked independently in a clone. The new test fails on main under TZ=Asia/Kolkata (exit 1). At the fix, the full suite passes 10/10 in Kolkata, UTC, Kathmandu, St_Johns and New_York, and fixtures/bizclock-fix.patch's own regression test (which sets TZ itself) passes 10/10 against Claude's fix.
 - **Impact / caveat:** Claude's test uses the host's local time, so it only detects the bug when the suite runs in a fractional-offset zone. Under TZ=UTC it passes on the buggy code too (checked: exit 0). bizclock's ci.yml runs in UTC, so in the vendor's own CI this test would not guard against a regression. Our gate passed because the fixer runs tests with TZ=Asia/Kolkata. Also: fixer_agent.log has no line with the `claude -p` duration or the gate result, so only the step-to-step time is known.
 - **Workaround / next step:** for agents (C): log claude -p wall time and the gate verdict in fixer_agent.log; optionally tell Claude in the prompt to make the test set process.env.TZ itself. Not blocking.
+
+## [2026-11-05 19:05 IST] platform (switch-ba) | Recorder: no Playwright installed; driving the installed Chrome over CDP instead
+- **Status:** worked-around
+- **What happened:** `import playwright` → ModuleNotFoundError, and there are no ms-playwright browsers. /usr/bin/google-chrome and ffmpeg (libvpx) are present.
+- **Evidence:** `uv run python -c "import playwright"`
+- **Impact:** none; no install needed.
+- **Workaround / next step:** scripts/record.py speaks the DevTools protocol through `websockets` (already a dependency) and pipes Page.startScreencast JPEGs into ffmpeg (VP8 webm, 25 fps).
+
+## [2026-11-05 19:05 IST] platform (switch-ba) | Recorder: Mattermost UI gotchas found and handled
+- **Status:** worked-around
+- **What happened:** (1) MM shows a "View in Desktop App / View in Browser" landing page on first visit. (2) Headless Chrome screencast frames came out at CSS size (1536x864) and then 1920x972. (3) The "Preview Mode: Email notifications…" banner and "Jump to recents" bar cover the top. (4) Setting the user preference collapsed_reply_threads=off had no effect (the server keeps collapsed threads), so replies don't show inline in the channel.
+- **Evidence:** media/raw/take-900-frames/*.jpg (test take)
+- **Impact:** without fixes the video would open on the landing page and be blurry or cropped.
+- **Workaround / next step:** (1) JS clicks "View in Browser". (2) --force-device-scale-factor=zoom + Emulation.setDeviceMetricsOverride(1920/zoom × 1080/zoom, dsf=zoom) gives a true 1920x1080. (3) JS closes the bars every second. (4) The recorder opens the new case thread full screen (/<team>/threads/<root>) as soon as its root post appears and keeps it scrolled to the bottom.
+
+## [2026-11-05 19:05 IST] platform (switch-ba) | Video clutter: dev's sidebar and thread list show test channels
+- **Status:** open (lead decides)
+- **What happened:** viewing as dev shows the channels kt-184812 and woym-selftest and their threads (from the kill test and my fresh-room test) in the sidebar and Followed threads list.
+- **Evidence:** media/raw/take-900-frames/0010s.jpg
+- **Impact:** test noise on screen in the video.
+- **Workaround / next step:** options: a dedicated "camera" MM user who is only in the recording room (cleanest), or archiving kt-*/woym-selftest. Both are writes to the shared Mattermost, so I'll wait for the lead's OK and a slot outside a live run.

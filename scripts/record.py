@@ -1,0 +1,323 @@
+"""Screen-record the WOYM room for the video (PLAN A8).
+
+  uv run python scripts/record.py                       # run `scripts/demo.py`, record it
+  uv run python scripts/record.py -- --until confirmed  # args after -- go to demo.py
+  uv run python scripts/record.py --attach --seconds 90 # record only; someone else runs the demo
+  uv run python scripts/record.py --headed              # show the browser window
+
+Output: media/raw/take-<n>.webm (VP8 at 25 fps, 1920x1080), plus
+media/raw/take-<n>-frames/*.jpg (one still every 10 s, for checking).
+
+How: the installed Google Chrome, driven over the DevTools protocol with the
+`websockets` package (no Playwright needed). It logs in to Mattermost as the
+viewer (default `dev`), opens the active room with reply threads shown inline,
+keeps it scrolled to the bottom, and pipes Page.startScreencast frames into ffmpeg.
+
+Lock rules (contracts §8): the recorder only READS. It writes no credentials and
+connects as no agent. Without --attach it refuses to start if a demo already holds
+var/run/live.lock, then starts demo.py, which takes the lock itself.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import httpx
+import websockets
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from woym import config  # noqa: E402
+from woym.switch import creds  # noqa: E402
+
+OUT_DIR = config.ROOT / "media" / "raw"
+MM = config.MATTERMOST_URL.rstrip("/")
+CHROME = shutil.which("google-chrome") or shutil.which("google-chrome-stable") or shutil.which("chromium")
+FPS = 25
+W, H = 1920, 1080
+
+
+def log(msg: str) -> None:
+    print(f"[record] {msg}", flush=True)
+
+
+class CDP:
+    def __init__(self, ws):
+        self.ws, self.n = ws, 0
+        self.pending: dict[int, asyncio.Future] = {}
+        self.handlers: dict[str, list] = {}
+        self.reader = asyncio.create_task(self._read())
+
+    async def _read(self) -> None:
+        async for raw in self.ws:
+            m = json.loads(raw)
+            if "id" in m and m["id"] in self.pending:
+                fut = self.pending.pop(m["id"])
+                if "error" in m:
+                    fut.set_exception(RuntimeError(f"CDP error: {m['error']}"))
+                else:
+                    fut.set_result(m.get("result", {}))
+            elif "method" in m:
+                for h in self.handlers.get(m["method"], []):
+                    asyncio.create_task(h(m.get("params", {})))
+
+    async def send(self, method: str, **params):
+        self.n += 1
+        fut = asyncio.get_running_loop().create_future()
+        self.pending[self.n] = fut
+        await self.ws.send(json.dumps({"id": self.n, "method": method, "params": params}))
+        return await asyncio.wait_for(fut, 30)
+
+    def on(self, method: str, fn) -> None:
+        self.handlers.setdefault(method, []).append(fn)
+
+
+def next_take() -> int:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    nums = [int(m.group(1)) for p in OUT_DIR.glob("take-*.webm") if (m := re.match(r"take-(\d+)\.webm", p.name))]
+    return max(nums, default=0) + 1
+
+
+def newest_root(tok: str, channel_id: str) -> str | None:
+    c = httpx.Client(base_url=f"{MM}/api/v4", headers={"Authorization": f"Bearer {tok}"}, timeout=10)
+    posts = c.get(f"/channels/{channel_id}/posts", params={"per_page": 60}).json()
+    for pid in posts.get("order", []):  # newest first
+        p = posts["posts"][pid]
+        if not p.get("root_id") and not p.get("type"):  # a user/agent root, not a system line
+            return pid
+    return None
+
+
+def mm_session(viewer: str) -> tuple[str, str, str, str]:
+    """Log the viewer in to Mattermost (session token for the browser cookie).
+    Returns (token, user_id, team_name, channel_name)."""
+    data = creds.load()
+    pw = f"Woym-{viewer}-Pass-1!"  # set by woym/switch/setup.py
+    r = httpx.post(f"{MM}/api/v4/users/login", json={"login_id": viewer, "password": pw}, timeout=15)
+    r.raise_for_status()
+    tok, uid = r.headers["Token"], r.json()["id"]
+    c = httpx.Client(base_url=f"{MM}/api/v4", headers={"Authorization": f"Bearer {tok}"}, timeout=15)
+    # show replies inline in the channel, so the whole case reads top to bottom
+    c.put(f"/users/{uid}/preferences", json=[
+        {"user_id": uid, "category": "display_settings", "name": "collapsed_reply_threads", "value": "off"},
+        {"user_id": uid, "category": "tutorial_step", "name": uid, "value": "999"},
+        {"user_id": uid, "category": "onboarding_task_list", "name": "onboarding_task_list_show", "value": "false"},
+        {"user_id": uid, "category": "onboarding_task_list", "name": "onboarding_task_list_open", "value": "false"},
+    ])
+    ch = c.get(f"/channels/{data['room']['channel_id']}").json()
+    team = c.get(f"/teams/{ch['team_id']}").json()["name"]
+    return tok, uid, team, ch["name"]
+
+
+async def launch_chrome(headed: bool, zoom: float) -> tuple[subprocess.Popen, str, str]:
+    # Lay out at 1920/zoom CSS px with a device scale of `zoom`, so text is larger
+    # and screencast frames still come out at a full 1920x1080 device pixels.
+    prof = tempfile.mkdtemp(prefix="woym-rec-")
+    args = [CHROME, f"--user-data-dir={prof}", "--remote-debugging-port=0",
+            f"--window-size={int(W / zoom)},{int(H / zoom)}", f"--force-device-scale-factor={zoom}",
+            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+            "--hide-scrollbars", "about:blank"]
+    if not headed:
+        args.insert(1, "--headless=new")
+    p = subprocess.Popen(args, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+    port_file = Path(prof) / "DevToolsActivePort"
+    for _ in range(100):
+        if port_file.exists() and port_file.read_text().strip():
+            break
+        await asyncio.sleep(0.1)
+    port = port_file.read_text().split()[0]
+    pages = httpx.get(f"http://127.0.0.1:{port}/json/list", timeout=5).json()
+    page = next(x for x in pages if x.get("type") == "page")
+    return p, page["webSocketDebuggerUrl"], prof
+
+
+LANDING_JS = """
+(() => {
+  const b = [...document.querySelectorAll('a,button')].find(e => /view in browser/i.test(e.textContent));
+  if (b) { b.click(); return 'clicked'; }
+  return document.querySelector('#post-list, #postListContent, .post-list__dynamic') ? 'app' : 'wait';
+})()
+"""
+
+KEEP_BOTTOM_JS = """
+(() => {
+  // close banners and "jump to recents" bars that cover the conversation
+  document.querySelectorAll('.announcement-bar__close, .toast__dismiss, .toast .close, [aria-label="Close announcement bar"]')
+    .forEach(b => b.click());
+  document.querySelectorAll('.post-list__dynamic, .ThreadViewer .post-list__dynamic, .ThreadPane .post-list__dynamic, '
+    + '[data-testid="virtualizedThreadViewer"] > div, .ThreadViewer .scrollbar--view')
+    .forEach(el => { el.scrollTop = el.scrollHeight; });
+  return true;
+})()
+"""
+
+
+async def record(args: argparse.Namespace) -> int:
+    if not CHROME:
+        log("no Chrome/Chromium found")
+        return 1
+    if not args.attach:
+        pid = creds.live_lock_holder()
+        if pid:
+            log(f"a demo is already running (lock pid {pid}); use --attach to record it, or wait")
+            return 1
+    take = args.take or next_take()
+    out = OUT_DIR / f"take-{take}.webm"
+    stills = OUT_DIR / f"take-{take}-frames"
+    stills.mkdir(parents=True, exist_ok=True)
+    tok, uid, team, chan = mm_session(args.viewer)
+    proc, wsurl, prof = await launch_chrome(args.headed, args.zoom)
+    ff = None
+    demo = None
+    try:
+        async with websockets.connect(wsurl, max_size=64 * 2**20) as ws:
+            cdp = CDP(ws)
+            await cdp.send("Page.enable")
+            await cdp.send("Network.enable")
+            # headless takes window height for (invisible) browser UI; pin the viewport
+            await cdp.send("Emulation.setDeviceMetricsOverride", width=int(W / args.zoom), height=int(H / args.zoom),
+                           deviceScaleFactor=args.zoom, mobile=False)
+            for name, value in (("MMAUTHTOKEN", tok), ("MMUSERID", uid)):
+                await cdp.send("Network.setCookie", name=name, value=value, domain="localhost", path="/")
+            url = f"{MM.replace('127.0.0.1', 'localhost')}/{team}/channels/{chan}"
+            await cdp.send("Page.navigate", url=url)
+            for _ in range(20):  # Mattermost's "View in Desktop App / Browser" landing page
+                await asyncio.sleep(1)
+                r = await cdp.send("Runtime.evaluate", returnByValue=True, expression=LANDING_JS)
+                if r.get("result", {}).get("value") == "app":
+                    break
+            await asyncio.sleep(3)
+            log(f"opened {url} as {args.viewer}")
+
+            latest = {"jpg": None, "n": 0}
+
+            async def on_frame(p):
+                latest["jpg"] = base64.b64decode(p["data"])
+                latest["n"] += 1
+                try:
+                    await cdp.send("Page.screencastFrameAck", sessionId=p["sessionId"])
+                except Exception:
+                    pass
+
+            cdp.on("Page.screencastFrame", on_frame)
+            await cdp.send("Page.startScreencast", format="jpeg", quality=85, maxWidth=W, maxHeight=H, everyNthFrame=1)
+            for _ in range(50):
+                if latest["jpg"]:
+                    break
+                await asyncio.sleep(0.1)
+            ff = subprocess.Popen(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe", "-framerate", str(FPS),
+                 "-c:v", "mjpeg", "-i", "-", "-vf", f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2", "-c:v", "libvpx", "-b:v", "4M", "-deadline", "realtime",
+                 "-cpu-used", "8", str(out)], stdin=subprocess.PIPE)
+            log(f"recording -> {out}")
+
+            stop = asyncio.Event()
+
+            async def writer():
+                frame_t = 1 / FPS
+                t0 = time.monotonic()
+                k = 0
+                next_still = 0.0
+                while not stop.is_set():
+                    if latest["jpg"]:
+                        ff.stdin.write(latest["jpg"])
+                        el = k * frame_t
+                        if el >= next_still:
+                            (stills / f"{int(el):04d}s.jpg").write_bytes(latest["jpg"])
+                            next_still += 10
+                    k += 1
+                    await asyncio.sleep(max(0.0, t0 + k * frame_t - time.monotonic()))
+
+            async def keep_bottom():
+                while not stop.is_set():
+                    try:
+                        await cdp.send("Runtime.evaluate", expression=KEEP_BOTTOM_JS)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1)
+
+            base = f"{MM.replace('127.0.0.1', 'localhost')}/{team}"
+            channel_id = creds.load()["room"]["channel_id"]
+            seen_root = None if args.open_latest else newest_root(tok, channel_id)
+
+            async def follow_thread():
+                # When a new case thread (root post) appears, open it full screen and stay on it.
+                nonlocal seen_root
+                while not stop.is_set():
+                    try:
+                        root = await asyncio.to_thread(newest_root, tok, channel_id)
+                    except Exception:
+                        root = None
+                    if root and root != seen_root:
+                        seen_root = root
+                        await asyncio.sleep(1.5)  # let the root render in the channel first
+                        await cdp.send("Page.navigate", url=f"{base}/threads/{root}")
+                        log(f"following thread {root}")
+                    await asyncio.sleep(1)
+
+            tasks = [asyncio.create_task(writer()), asyncio.create_task(keep_bottom()),
+                     asyncio.create_task(follow_thread())]
+            started = time.monotonic()
+            if args.attach:
+                try:
+                    await asyncio.sleep(args.seconds)
+                except asyncio.CancelledError:
+                    pass
+                rc = 0
+            else:
+                await asyncio.sleep(args.lead_in)
+                cmd = ["uv", "run", "python", "scripts/demo.py", *args.demo_args]
+                log(f"running {' '.join(cmd)}")
+                demo = await asyncio.create_subprocess_exec(*cmd, cwd=config.ROOT)
+                rc = await demo.wait()
+                log(f"demo.py exited {rc}; recording {args.tail}s more")
+                await asyncio.sleep(args.tail)
+            stop.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            log(f"{time.monotonic() - started:.0f}s recorded, {latest['n']} screencast frames")
+            await cdp.send("Page.stopScreencast")
+            cdp.reader.cancel()
+        return rc
+    finally:
+        if ff:
+            ff.stdin.close()
+            ff.wait(timeout=60)
+            log(f"wrote {out} ({out.stat().st_size // 1024} KiB)" if out.exists() else "ffmpeg wrote nothing")
+        if demo and demo.returncode is None:
+            demo.terminate()
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        shutil.rmtree(prof, ignore_errors=True)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Record the WOYM room (read-only viewer)")
+    ap.add_argument("--viewer", default=config.VENDOR_HUMAN, help="Mattermost user to watch as (default dev)")
+    ap.add_argument("--take", type=int, help="take number (default: next free)")
+    ap.add_argument("--zoom", type=float, default=1.25, help="page zoom for readability (default 1.25)")
+    ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--attach", action="store_true", help="don't run demo.py; just record --seconds")
+    ap.add_argument("--seconds", type=float, default=60)
+    ap.add_argument("--open-latest", action="store_true", help="open the newest existing thread right away (testing)")
+    ap.add_argument("--lead-in", type=float, default=3, help="seconds of idle room before the demo starts")
+    ap.add_argument("--tail", type=float, default=5, help="seconds to keep recording after demo.py exits")
+    ap.add_argument("demo_args", nargs="*", help="args for demo.py (put them after --)")
+    return asyncio.run(record(ap.parse_args()))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

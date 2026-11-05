@@ -9,7 +9,10 @@ It reads:
   - var/run/live.lock, var/cases.json (latest case and step).
 
 An agent counts as connected when Switch reports it "live" in the active room
-(rooms[].status, or a session with state "live"). Exit 0 when the stack is up and all 4 agents are connected, 1 otherwise.
+(rooms[].status, or a session with state "live").
+Default: exit 0 = ready for `make demo` (stack, room, Meera's rule, identity
+links, no demo running); agents not connected is shown as info (·).
+--agents: exit 0 only if all 4 agents are connected too (a demo is running). Exit 0 when the stack is up and all 4 agents are connected, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -64,8 +67,8 @@ def describe_policy(policy: dict | None, names: dict[str, str]) -> str:
     return " | ".join(parts)
 
 
-def collect() -> dict[str, Any]:
-    s: dict[str, Any] = {"ok": True, "problems": []}
+def collect(require_agents: bool = False) -> dict[str, Any]:
+    s: dict[str, Any] = {"ok": True, "problems": [], "require_agents": require_agents}
 
     def bad(msg: str) -> None:
         s["ok"] = False
@@ -82,6 +85,8 @@ def collect() -> dict[str, Any]:
 
     pid = creds.live_lock_holder()
     s["live_run"] = f"running (pid {pid})" if pid else "none"
+    if pid and not require_agents:
+        bad(f"a demo is already running (pid {pid}); wait for it to finish")
 
     try:
         data = creds.load()
@@ -128,8 +133,28 @@ def collect() -> dict[str, Any]:
             }
             if not in_room:
                 bad(f"{n}: not a member of room {room.get('name')}")
-            if not live:
+            if not s["agents"][n]["connected"] and require_agents:
                 bad(f"{n}: not connected (start the agents)")
+        # Meera's rule on acme-env must admit triage (by uuid), set by its owner
+        acme = data["agents"].get(config.AGENT_CUSTOMER, {})
+        d = gw.get(f"/agents/{acme.get('id')}").json() if acme else {}
+        rules = (d.get("addressing_policy") or {}).get("rules") or []
+        tri_id = data["agents"].get(config.AGENT_TRIAGE, {}).get("id")
+        s["acme_rule_ok"] = bool(rules) and any(tri_id in (r.get("agents") or []) for r in rules) \
+            and d.get("owner_name") == config.CUSTOMER_HUMAN
+        if not s["acme_rule_ok"]:
+            bad("acme-env: Meera's rule admitting triage is missing (make setup)")
+        # identity links: each human's Mattermost account claimed by their Switch user
+        s["identity_links"] = {}
+        for h, hu in data.get("humans", {}).items():
+            c = httpx.Client(base_url=f"{SWITCH}/gateway", timeout=10)
+            ok = False
+            if c.post("/auth/login", json={"email": hu.get("email"), "password": hu.get("switch_password")}).status_code == 200:
+                ids = c.get("/auth/me/identities").json()
+                ok = any(i.get("external_user_id") == hu.get("mm_user_id") for i in ids)
+            s["identity_links"][h] = ok
+            if not ok:
+                bad(f"{h}: Mattermost account not linked to Switch user (make setup)")
 
     try:
         cases = json.loads(config.CASES_DB.read_text()).get("cases", {})
@@ -149,7 +174,7 @@ def show(s: dict[str, Any]) -> None:
     mark = lambda ok: "✅" if ok else "❌"  # noqa: E731
     print(f"{mark(s.get('switch') == 'up')} switch       {s.get('switch')}")
     print(f"{mark(s.get('mattermost') == 'up')} mattermost   {s.get('mattermost')}")
-    print(f"   live run     {s.get('live_run')}")
+    print(f"{mark(s.get('live_run') == 'none' or s['require_agents'])} live run     {s.get('live_run')}")
     r = s.get("room")
     if r:
         print(f"   room         {r['name']}  {r['id']}  (mm channel {r['channel_id']})")
@@ -159,22 +184,33 @@ def show(s: dict[str, Any]) -> None:
         if "error" in a:
             print(f"{mark(False)} @{n:9} {a['error']}")
             continue
-        conn = "connected" if a["connected"] else "NOT connected"
-        print(f"{mark(a['connected'] and a['in_room'])} @{n:9} {conn:13} owner: {a['owner']:6} addressing: {a['addressing']}")
+        conn = "connected" if a["connected"] else "not connected"
+        if a["connected"] or not s["require_agents"]:
+            m = "✅" if a["connected"] and a["in_room"] else ("·" if a["in_room"] else "❌")
+            m = m + " " if m == "·" else m
+        else:
+            m = mark(False)
+        print(f"{m} @{n:9} {conn:13} owner: {a['owner']:6} addressing: {a['addressing']}")
+    if "acme_rule_ok" in s:
+        print(f"{mark(s['acme_rule_ok'])} acme-env rule  set by meera, admits triage")
+    for h, ok in (s.get("identity_links") or {}).items():
+        print(f"{mark(ok)} link {h:9} Mattermost account → Switch user {h}")
     c = s.get("latest_case")
     if c:
         warn = "" if c["room_matches"] else "  (different room)"
         print(f"   latest case  #{c['id']} step={c['step']} hops={c['hops']} last={c['last']}{warn}")
     else:
         print("   latest case  none")
-    print("\nREADY" if s["ok"] else "\nNOT READY:\n - " + "\n - ".join(s["problems"]))
+    what = "READY (agents connected)" if s["require_agents"] else "READY for make demo"
+    print(f"\n{what}" if s["ok"] else "\nNOT READY:\n - " + "\n - ".join(s["problems"]))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="WOYM preflight (read-only)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--agents", action="store_true", help="also require all 4 agents connected (during a run)")
     a = ap.parse_args()
-    s = collect()
+    s = collect(a.agents)
     if a.json:
         print(json.dumps(s, indent=2))
     else:
