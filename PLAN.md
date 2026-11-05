@@ -49,7 +49,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 | Who | Session | Role | Owns |
 |---|---|---|---|
 | **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
-| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `tests/switch/`, `docs/switch-notes.md` |
+| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `tests/switch/`, `docs/switch-notes.md` |
 | **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg`, `docs/drafts/` |
 | **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/` |
 
@@ -71,6 +71,9 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 - **A3 Client.** `woym/switch/client.py` implements `SwitchClient` from `contracts.py`: reconnect, pings, ops, events mapped to `MessageEvent`. Add `python -m woym.switch.probe` for manual checks.
 - **A4 Humans.** `scripts/humans.py meera "…"` / `dev "…"` posts as that user through the Mattermost REST API, optionally in a thread. Used for the scripted demo and QA. The demo labels these lines as scripted.
 - **A5 Setup.** `scripts/setup.sh`: idempotent bootstrap after `up` (users, keys, room, agents' addressing, follow-ups off). Print anything that stays manual.
+
+- **A6 Status.** `make status` (`scripts/status.py`) is the preflight before recording. It shows stack health, each agent's connection and owner, Meera's rule on @acme-env, the room id and the latest case step.
+- **A7 Recording room.** `python -m woym.switch.setup --fresh-room <name>` creates a clean room per video take, with the same agents, rule and links, and makes it the active room.
 
 ### B: Sandbox (switch-7c)
 - **B1 bizclock** in `fixtures/bizclock/`:
@@ -143,7 +146,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 | When | Milestone | Gate |
 |---|---|---|
-| Nov 5, 23:00 | A2 kill test results; B1–B3 running locally; C1 tested | **Go/no-go on cross-owner messaging.** If no-go, follow the fallbacks in `.hack/decision.md`, log them, and re-plan |
+| Nov 5, 23:00 | A2 kill test results; B1–B3 running locally; C1 tested | **GO (19:xx IST):** cross-owner addressing is Switch-enforced on live 0.31.0 |
 | Nov 6, 13:00 | A3–A5, B4–B5, C2–C3 done against the contracts | |
 | Nov 6, 18:00 | **M1**: report → NOT REPRODUCED → consent → lineup → bisect → CONFIRMED BOTH, in real Mattermost | Submittable on its own |
 | Nov 6, 23:59 | **M2**: fix → matrix → FIXED ON MEERA'S MACHINE | |
