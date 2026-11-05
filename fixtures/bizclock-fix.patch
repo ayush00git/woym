@@ -1,0 +1,126 @@
+From eb4b88c252b2cf95d590ba85ec55875127636729 Mon Sep 17 00:00:00 2001
+From: WOYM reference fix <fixture@woym.invalid>
+Date: Thu, 5 Nov 2026 19:30:00 +0530
+Subject: [PATCH] fix: use exact local time in nextCutoff(), not a whole-hour
+ offset
+
+nextCutoff() shifted dates by Math.round(-getTimezoneOffset() / 60) hours.
+In zones with a fractional offset (Asia/Kolkata +05:30) that is off by 30
+minutes, so a Friday 17:10 order was treated as 17:40 and rolled to Monday.
+
+Compute the cutoff with local getters/setters instead, and add a regression
+test that runs in several non-whole-hour zones.
+
+This is the stored reference fix used by WOYM's FIXER=fixture mode.
+---
+ src/index.js           | 36 ++++++++----------------------------
+ test/cutoff-tz.test.js | 38 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 28 deletions(-)
+ create mode 100644 test/cutoff-tz.test.js
+
+diff --git a/src/index.js b/src/index.js
+index 3a07643..66bc99d 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -7,10 +7,6 @@
+ // cutoff (default 17:30) is paid out that day; anything later rolls to the
+ // next business day's cutoff.
+ 
+-const HOUR_MS = 60 * 60 * 1000;
+-const MINUTE_MS = 60 * 1000;
+-const DAY_MS = 24 * HOUR_MS;
+-
+ const DEFAULT_CUTOFF = '17:30';
+ 
+ function parseCutoff(value) {
+@@ -26,11 +22,6 @@ function parseCutoff(value) {
+   return { hours, minutes };
+ }
+ 
+-// Offset of the host zone from UTC at `date`, in hours.
+-function localOffsetHours(date) {
+-  return Math.round(-date.getTimezoneOffset() / 60);
+-}
+-
+ function isBusinessDay(date) {
+   const day = date.getDay();
+   return day !== 0 && day !== 6;
+@@ -47,26 +38,15 @@ function nextCutoff(date, options = {}) {
+   }
+   const cutoff = parseCutoff(options.cutoff || DEFAULT_CUTOFF);
+ 
+-  // Shift into "local wall-clock" time so the UTC getters below read local
+-  // fields, then shift the result back.
+-  const offsetMs = localOffsetHours(date) * HOUR_MS;
+-  const local = date.getTime() + offsetMs;
+-  const wall = new Date(local);
+-
+-  let candidate =
+-    Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate()) +
+-    cutoff.hours * HOUR_MS +
+-    cutoff.minutes * MINUTE_MS;
+-
+-  while (candidate < local || isWeekendUTC(candidate)) {
+-    candidate += DAY_MS;
++  // Work in local wall-clock time directly. Offsets are not always whole
++  // hours (IST is +05:30, Nepal +05:45), so never shift by a rounded offset.
++  const candidate = new Date(
++    date.getFullYear(), date.getMonth(), date.getDate(), cutoff.hours, cutoff.minutes
++  );
++  while (candidate < date || !isBusinessDay(candidate)) {
++    candidate.setDate(candidate.getDate() + 1);
+   }
+-  return new Date(candidate - offsetMs);
+-}
+-
+-function isWeekendUTC(ms) {
+-  const day = new Date(ms).getUTCDay();
+-  return day === 0 || day === 6;
++  return candidate;
+ }
+ 
+ module.exports = { nextCutoff, isBusinessDay, DEFAULT_CUTOFF };
+diff --git a/test/cutoff-tz.test.js b/test/cutoff-tz.test.js
+new file mode 100644
+index 0000000..e2bc9e1
+--- /dev/null
++++ b/test/cutoff-tz.test.js
+@@ -0,0 +1,38 @@
++'use strict';
++
++// Regression: zones whose UTC offset is not a whole number of hours.
++// nextCutoff() used to round the offset to whole hours, so IST (+05:30) was
++// treated as +06:00 and a Friday 17:10 order missed the 17:30 cutoff.
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { nextCutoff } = require('..');
++
++function inZone(tz, fn) {
++  const saved = process.env.TZ;
++  process.env.TZ = tz;
++  try {
++    fn();
++  } finally {
++    if (saved === undefined) delete process.env.TZ;
++    else process.env.TZ = saved;
++  }
++}
++
++const zones = ['Asia/Kolkata', 'Asia/Kathmandu', 'America/St_Johns', 'Australia/Adelaide', 'UTC'];
++
++for (const tz of zones) {
++  test(`Friday 17:10 is before the 17:30 cutoff in ${tz}`, () => {
++    inZone(tz, () => {
++      const order = new Date(2026, 10, 6, 17, 10);
++      assert.deepEqual(nextCutoff(order), new Date(2026, 10, 6, 17, 30));
++    });
++  });
++
++  test(`Friday 17:40 rolls to Monday 17:30 in ${tz}`, () => {
++    inZone(tz, () => {
++      const order = new Date(2026, 10, 6, 17, 40);
++      assert.deepEqual(nextCutoff(order), new Date(2026, 10, 9, 17, 30));
++    });
++  });
++}

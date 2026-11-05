@@ -1,0 +1,24 @@
+{
+  "name": "bizclock",
+  "version": "2.3.2-dev",
+  "description": "Business-day cutoffs and payout dates. Zero dependencies.",
+  "main": "src/index.js",
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "business-day",
+    "cutoff",
+    "payout",
+    "settlement",
+    "date"
+  ],
+  "author": "Priya Raman <priya@bizclock.dev>",
+  "license": "MIT"
+}
