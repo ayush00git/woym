@@ -130,3 +130,10 @@ EOF
 - **Evidence:** Found by sandbox while testing reset from a dirty state, before the code was handed over.
 - **Impact:** None shipped. Any pattern-based process kill in the demo tooling could do the same thing.
 - **Workaround / next step:** reset now reads /proc/<pid>/cmdline and requires argv[0]=python*, argv[1]=-m and argv[2]=woym.agents.<name> exactly. It also checks the cwd is this checkout and skips $$ and $PPID.
+
+## [2026-11-05 18:49 IST] lead | Several log timestamps above were estimated, not clock time
+- **Status:** fixed (process)
+- **What happened:** Entries stamped 19:00–20:50 IST were written before 18:49 IST by the real clock (`date`). Sessions estimated the time instead of reading it. The content is accurate; the times aren't.
+- **Evidence:** `date` returned 18:28 IST at `git init` and 18:49 IST when this entry was written. Commit times in `git log --format='%h %ad'` are the real ones.
+- **Impact:** Only the order of the log. No technical impact.
+- **Workaround / next step:** From now on every entry uses `$(date '+%Y-%m-%d %H:%M IST')`. All sessions have been told.
