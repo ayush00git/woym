@@ -1,5 +1,5 @@
 # WOYM: one-command entry points. Targets are filled in as components land.
-.PHONY: help sync test up down setup status demo reset fresh images customer-up customer-down
+.PHONY: help sync test up down setup status demo setup-epilogue demo-epilogue reset fresh images customer-up customer-down
 
 help:
 	@echo "make sync      install python deps (uv)"
@@ -9,6 +9,7 @@ help:
 	@echo "make setup     users, keys, room, addressing (scripts/setup.sh)"
 	@echo "make status    preflight: stack, agents, owners, rule, room, latest case"
 	@echo "make demo      run the full case end to end (FIXER=claude|fixture, default claude)"
+	@echo "make setup-epilogue / demo-epilogue   third owner + Nepal room, then the full flow plus the KNOWN epilogue"
 	@echo "make reset     back to the pre-demo state (scripts/reset.sh)"
 	@echo "make fresh     clone HEAD to a temp dir and run the judge path (scripts/fresh-clone-test.sh)"
 	@echo "make images    pre-pull node images and build the acme-laptop image"
@@ -33,6 +34,13 @@ FIXER ?= claude
 
 demo:
 	uv run python scripts/demo.py --fixer $(FIXER)
+
+setup-epilogue:
+	uv run python -m woym.switch.setup --customer acme-nepal
+	$(MAKE) customer-up NAME=kiran-laptop
+
+demo-epilogue:
+	WOYM_KNOWN=1 uv run python scripts/demo.py --fixer $(FIXER) --epilogue
 
 images:
 	./scripts/pull-images.sh
