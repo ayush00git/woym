@@ -3,6 +3,7 @@
   uv run python scripts/demo.py                  # full flow, through FIXED ON MEERA'S MACHINE
   uv run python scripts/demo.py --until confirmed  # M1: stop at CONFIRMED ON BOTH MACHINES
   options: --no-reset  --keep-agents  --fixer fixture|claude  --no-preflight  --no-refusal-beat
+  WOYM_KNOWN=1 ... --epilogue   # after FIXED: Kiran (acme-nepal) is answered from the known fix
 
 What it does:
 1. preflight: Switch /health, Mattermost ping, var/switch/credentials.json,
@@ -76,11 +77,14 @@ class Poster(Protocol):
     def __call__(self, who: str, text: str, thread: str | None) -> str: ...
 
 
-def humans_poster(who: str, text: str, thread: str | None) -> str:
-    """scripts/humans.py (platform): prints the new post id."""
+def humans_poster(who: str, text: str, thread: str | None, room: str | None = None) -> str:
+    """scripts/humans.py (platform): prints the new post id. `room` is a room name
+    in credentials.json rooms (e.g. acme-nepal); default: the active room."""
     cmd = ["uv", "run", "--quiet", "python", str(config.ROOT / "scripts" / "humans.py"), who, text]
     if thread:
         cmd += ["--thread", thread]
+    if room:
+        cmd += ["--room", room]
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if p.returncode != 0 or not p.stdout.strip():
         raise DemoFailed(3, f"humans.py {who} failed (exit {p.returncode}): {p.stderr.strip()[-400:]}")
@@ -96,6 +100,7 @@ class AgentProcs:
     run_dir: Path = RUN_DIR
     env: dict[str, str] = field(default_factory=dict)
     procs: dict[str, subprocess.Popen] = field(default_factory=dict)
+    ready_count: dict[str, int] = field(default_factory=dict)  # ready lines needed (triage: 1 per room)
 
     def start(self, timeout_s: float = 45, settle_s: float = 1.0) -> None:
         self.logs.mkdir(parents=True, exist_ok=True)
@@ -114,7 +119,8 @@ class AgentProcs:
                 if self.procs[name].poll() is not None:
                     raise DemoFailed(3, f"agent {name} exited (code {self.procs[name].returncode}):\n"
                                         f"{tail(self.logs / f'{name}.log')}")
-                if READY_MARK in (self.logs / f"{name}.log").read_text(errors="replace"):
+                text = (self.logs / f"{name}.log").read_text(errors="replace")
+                if text.count(READY_MARK) >= self.ready_count.get(name, 1):
                     waiting.discard(name)
             if waiting and time.monotonic() > deadline:
                 raise DemoFailed(3, f"agents not connected after {timeout_s:.0f}s: {', '.join(sorted(waiting))}")
@@ -223,10 +229,11 @@ def mm_reader(root: str) -> list[Post]:
 
 
 class Timeline:
-    def __init__(self, out=print, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, out: Callable[[str], None] | None = None, clock: Callable[[], float] = time.monotonic):
         self.t0 = clock()
         self.clock = clock
-        self.out = out
+        # flush every line: a recorder or `| tee` reading our stdout sees each beat as it happens
+        self.out = out or (lambda line: print(line, flush=True))
         self.rows: list[tuple[float, str]] = []
 
     def __call__(self, msg: str) -> None:
@@ -323,6 +330,113 @@ def run_case(post: Poster, store: CaseStore, until: str, install_consent: bool, 
             else:
                 say(f"*** {beat.label} ***")
     return case_id or 0
+
+
+# --------------------------------------------------------------------------
+# Epilogue (WOYM_KNOWN=1, --epilogue): a second customer, answered from a known fix
+# --------------------------------------------------------------------------
+
+NEPAL_ROOM = "acme-nepal"
+KIRAN, NEPAL_AGENT, KIRAN_LAPTOP = config.CUSTOMERS[NEPAL_ROOM]
+KIRAN_REPORT = (
+    "@triage Same problem at Acme Nepal: a Friday 17:20 order should settle Friday (cutoff 17:30) "
+    "but bizclock says Monday. Our repro prints `cutoff=Mon 17:15 payout=Mon`."
+)
+KNOWN_CARD = "KNOWN ISSUE · already fixed"
+# Steps a known-path case may pass through; anything else means it left that path.
+EPILOGUE_PATH = [s.value for s in (Step.REPORTED, Step.ENV_REQUESTED, Step.CONSENT_PENDING,
+                                   Step.ENV_RECEIVED, Step.KNOWN_FIXED)]
+
+
+def run_epilogue(post: Poster, store: CaseStore, say: Timeline, read: Reader | None,
+                 check: Callable[[], None] = lambda: None, known_db: Path | None = None,
+                 poll_s: float = 0.25, timeout_s: float = 120) -> int:
+    """After Meera's FIXED: Kiran (another Acme team, Kathmandu, +05:45) reports the
+    same symptom. Triage matches the verified fix and answers with a KNOWN card,
+    after Kiran's own agent shares her values with her consent."""
+    known_db = Path(known_db or config.KNOWN_DB)
+
+    def until(cond: Callable[[], bool], what: str, limit: float = timeout_s) -> None:
+        limit = min(limit, timeout_s)  # timeout_s caps every wait (tests pass a small one)
+        deadline = time.monotonic() + limit
+        while not cond():
+            check()
+            if time.monotonic() > deadline:
+                raise DemoFailed(1, f"epilogue: timed out after {limit:.0f}s waiting for {what}")
+            time.sleep(poll_s)
+
+    # triage writes the record in the same handler as Meera's FIXED; wait for the file itself.
+    until(known_db.exists, f"{known_db.name} (triage records the verified fix)", 30)
+    say(f"known-fix record written ({known_db.relative_to(config.ROOT) if known_db.is_relative_to(config.ROOT) else known_db})")
+
+    known = {c.id for c in store.all()}
+    say(f"[SCRIPTED] {KIRAN}: {KIRAN_REPORT}   (room {NEPAL_ROOM})")
+    root = post(KIRAN, KIRAN_REPORT, None)
+    say(f"Kiran's report posted (thread root {root})")
+
+    state: dict = {"id": None, "step": None, "seen": set()}
+
+    def step_now() -> str | None:
+        if state["id"] is None:
+            new = [c for c in store.all() if c.id not in known and c.reporter == KIRAN]
+            if not new:
+                return None
+            state["id"] = max(c.id for c in new)
+            say(f"case {state['id']} opened by @triage (reporter {KIRAN})")
+        case = store.get(state["id"])
+        for h in case.history:
+            if h not in state["seen"]:
+                state["seen"].add(h)
+                say(f"  hop {h}")
+        st = case.step.value
+        if st != state["step"]:
+            state["step"] = st
+            say(f"case {state['id']} step -> {st}")
+        if st == Step.FAILED.value:
+            raise DemoFailed(2, f"epilogue: case {state['id']} FAILED (history: {', '.join(case.history)})")
+        if st not in EPILOGUE_PATH:
+            raise DemoFailed(1, f"epilogue: case {state['id']} left the known-fix path at step {st} "
+                                "(no match in var/known.json?)")
+        return st
+
+    def at(target: str) -> bool:
+        st = step_now()
+        return st is not None and EPILOGUE_PATH.index(st) >= EPILOGUE_PATH.index(target)
+
+    until(lambda: step_now() is not None, "Kiran's case to open", 60)
+    until(lambda: at(Step.CONSENT_PENDING.value), "nepal-env's consent question")
+    say(f"[SCRIPTED] {KIRAN}: yes   (Kiran agrees to share 5 values)")
+    post(KIRAN, "yes", root)
+    until(lambda: at(Step.KNOWN_FIXED.value), "the known-fix match")
+    if read:
+        until(lambda: any(who == config.AGENT_TRIAGE and KNOWN_CARD in msg for who, msg in read(root)),
+              f"@triage's {KNOWN_CARD} card", 20)
+        say(f"*** {KNOWN_CARD} *** (card visible in Kiran's thread)")
+    else:
+        say(f"*** {KNOWN_CARD} ***")
+    return state["id"]
+
+
+def preflight_epilogue() -> list[str]:
+    from woym.switch import creds
+
+    problems = []
+    try:
+        data = creds.load()
+    except FileNotFoundError as e:
+        return [str(e)]
+    room = data.get("rooms", {}).get(NEPAL_ROOM, {})
+    if not (room.get("id") and room.get("channel_id")):
+        problems.append(f"room {NEPAL_ROOM} missing from credentials.json (platform A10 setup)")
+    if KIRAN not in data.get("humans", {}):
+        problems.append(f"human {KIRAN} missing from credentials.json")
+    if NEPAL_AGENT not in data.get("agents", {}):
+        problems.append(f"agent {NEPAL_AGENT} missing from credentials.json")
+    p = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", KIRAN_LAPTOP], capture_output=True, text=True)
+    if p.stdout.strip() != "true":
+        problems.append(f"{KIRAN_LAPTOP} not running (reset starts it with WOYM_KNOWN=1, or "
+                        f"`uv run python -m woym.sandbox.customer --name {KIRAN_LAPTOP} up`)")
+    return problems
 
 
 # --------------------------------------------------------------------------
@@ -444,19 +558,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-agents", action="store_true", help="leave agents running afterwards")
     ap.add_argument("--refusal-beat", action=argparse.BooleanOptionalAction, default=True,
                     help="after CONFIRMED, dev @mentions Meera's agent directly and Switch refuses (default on)")
+    ap.add_argument("--epilogue", action="store_true",
+                    help="after FIXED, Kiran (acme-nepal) is answered from the known fix (needs WOYM_KNOWN=1)")
     a = ap.parse_args(argv)
     install_consent = os.environ.get("WOYM_INSTALL_CONSENT", "1") != "0"
     say = Timeline()
 
     say(f"WOYM demo: until={a.until} fixer={a.fixer} install_consent={int(install_consent)}")
     say("Human lines marked [SCRIPTED] are posted by scripts/humans.py, not typed live.")
+    commands = {n: ["uv", "run", "--quiet", "python", "-m", f"woym.agents.{n}"] for n in AGENTS}
+    ready = {}
+    if a.epilogue:
+        # nepal-env is the same agent code as acme-env, for Kiran, in room acme-nepal
+        commands["nepal_env"] = ["env", f"WOYM_AGENT_NAME={NEPAL_AGENT}", *commands["acme_env"]]
+        # with WOYM_KNOWN=1 triage and runner connect to both rooms: one ready line per room
+        ready["triage"] = ready["runner_agent"] = 2
     agents = AgentProcs(
-        {n: ["uv", "run", "--quiet", "python", "-m", f"woym.agents.{n}"] for n in AGENTS},
+        commands,
         env={"FIXER": a.fixer, "WOYM_INSTALL_CONSENT": "1" if install_consent else "0"},
+        ready_count=ready,
     )
     # SIGTERM runs the finally block too: agents stopped, lock released.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
+        if a.epilogue and (os.environ.get("WOYM_KNOWN") != "1" or a.until != "fixed"):
+            raise DemoFailed(3, "--epilogue needs WOYM_KNOWN=1 in the environment and the full flow (--until fixed)")
         acquire_live_lock()
         say(f"live lock taken ({LIVE_LOCK.relative_to(config.ROOT)}, pid {os.getpid()})")
         if not a.no_preflight:
@@ -467,12 +593,17 @@ def main(argv: list[str] | None = None) -> int:
         if not a.no_reset:
             subprocess.run([str(config.ROOT / "scripts" / "reset.sh")], check=True, capture_output=True)
             say("reset ok (customer on v2.3.1, no fix branches, empty case store)")
+        if a.epilogue and not a.no_preflight:
+            problems = preflight_epilogue()
+            if problems:
+                raise DemoFailed(3, "epilogue preflight failed:\n  - " + "\n  - ".join(problems))
+            say(f"epilogue preflight ok ({NEPAL_ROOM}, {NEPAL_AGENT}, {KIRAN_LAPTOP})")
         try:
             check = room_guard()  # before the agents start: they bind to the room in this file
         except FileNotFoundError as e:
             raise DemoFailed(3, str(e)) from None
         agents.start()
-        say(f"agents connected: {', '.join(AGENTS)} (logs in {config.LOGS.relative_to(config.ROOT)}/)")
+        say(f"agents connected: {', '.join(commands)} (logs in {config.LOGS.relative_to(config.ROOT)}/)")
         room_check = check
 
         def check() -> None:
@@ -485,12 +616,20 @@ def main(argv: list[str] | None = None) -> int:
 
         case_id = run_case(post, CaseStore(), a.until, install_consent, a.fixer, say,
                            read=mm_reader, refusal_beat=a.refusal_beat, check=check)
+        if a.epilogue:
+            def post_nepal(who: str, text: str, thread: str | None) -> str:
+                check()
+                return humans_poster(who, text, thread, room=NEPAL_ROOM)
+
+            kiran_case = run_epilogue(post_nepal, CaseStore(), say, mm_reader, check=check)
+            say(f"DONE: case {case_id} fixed, case {kiran_case} answered as KNOWN in {say.rows[-1][0]:.1f}s")
+            return 0
         say(f"DONE: case {case_id} reached {a.until} in {say.rows[-1][0]:.1f}s")
         return 0
     except DemoFailed as e:
         say(f"DEMO FAILED: {e}")
         for name in agents.procs:
-            print(f"--- {name}.log (tail) ---\n{tail(config.LOGS / f'{name}.log')}")
+            print(f"--- {name}.log (tail) ---\n{tail(config.LOGS / f'{name}.log')}", flush=True)
         return e.code
     except subprocess.CalledProcessError as e:
         say(f"DEMO FAILED: {e.cmd[0]} exited {e.returncode}: {(e.stderr or b'').decode()[-400:]}")

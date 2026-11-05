@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import os
 import re
 import subprocess
 import time
@@ -75,6 +76,8 @@ def docker_command(env: Env, name: str) -> list[str]:
             raise SandboxError(f"refusing unsafe {key} value {getattr(env, key)!r}")
     return [
         "docker", "run", "-i", "--rm", "--name", name,
+        # who started it, so scripts/reset.sh only removes runs whose owner process is dead
+        "--label", f"woym.owner_pid={os.getpid()}", "--label", f"woym.root={config.ROOT}",
         "--network", "none",
         "--read-only",
         "--tmpfs", "/work:rw,size=64m,mode=1777",

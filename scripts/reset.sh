@@ -5,10 +5,12 @@
 #
 # 1. stops the agent processes started from THIS checkout (pidfiles in
 #    var/run/, plus any `python -m woym.agents.*` whose cwd is this repo);
-# 2. removes leftover sandbox containers (woym-run-*);
+# 2. removes orphaned sandbox containers (woym-run-* from this checkout whose owner process is dead);
 # 3. deletes fix/* branches from the bare remote (creates the remote if missing);
-# 4. clears var/cases.json, var/work/ and var/logs/;
-# 5. puts the customer laptop back on bizclock v2.3.1 (starts it if it's not running).
+# 4. clears var/cases.json, var/known.json, var/work/ and var/logs/;
+# 5. puts the customer laptop back on bizclock v2.3.1 (starts it if it's not running);
+# 6. same for kiran-laptop (epilogue) if it exists, or starts it when WOYM_KNOWN=1;
+#    var/known.json (the known-culprit record) is cleared in step 4.
 #
 # It does NOT touch the Switch stack or Mattermost: old demo threads stay in
 # the channel; the next demo opens a new thread.
@@ -62,9 +64,18 @@ else
 fi
 
 # --- 2. sandbox leftovers ----------------------------------------------------
-step "remove leftover sandbox runs"
-left="$(docker ps -aq --filter 'name=^woym-run-' 2>/dev/null || true)"
-if [ -n "$left" ]; then docker rm -f $left >/dev/null; done_ "removed $(echo "$left" | wc -l)"; else done_ "none"; fi
+step "remove orphaned sandbox runs"
+# Only runs started from THIS checkout whose starting process is gone. A run whose
+# owner is alive (another session's tests, a demo in another shell) is left alone.
+left=()
+while read -r cid opid oroot; do
+  [ -n "$cid" ] || continue
+  [ "$oroot" = "$ROOT" ] || continue
+  if [[ "$opid" =~ ^[0-9]+$ ]] && kill -0 "$opid" 2>/dev/null; then continue; fi
+  left+=("$cid")
+done < <(docker ps -a --filter 'name=^woym-run-' \
+           --format '{{.ID}} {{.Label "woym.owner_pid"}} {{.Label "woym.root"}}' 2>/dev/null || true)
+if [ ${#left[@]} -gt 0 ]; then docker rm -f "${left[@]}" >/dev/null; done_ "removed ${#left[@]}"; else done_ "none"; fi
 
 # --- 3. bare remote ----------------------------------------------------------
 step "fix/* branches on bare remote"
@@ -81,8 +92,8 @@ else
 fi
 
 # --- 4. runtime state --------------------------------------------------------
-step "clear cases, work clones, logs"
-rm -f "$VAR/cases.json" "$VAR"/.cases.*.json
+step "clear cases, known, work, logs"
+rm -f "$VAR/cases.json" "$VAR"/.cases.*.json "$VAR/known.json"
 rm -rf "$VAR/work" "$VAR/logs"
 done_
 
@@ -97,6 +108,23 @@ fi
 case "$out" in
   *'"bizclock": "v2.3.1"'*) done_ "ok ($([ "$state" = true ] && echo reinstalled || echo started))" ;;
   *) done_ "FAILED"; echo "$out" >&2; exit 1 ;;
+esac
+
+# --- 6. epilogue laptop (Kiran) ----------------------------------------------
+# Back on v2.3.1 if it exists; started only when the epilogue is on (WOYM_KNOWN=1).
+step "kiran-laptop on v2.3.1"
+kstate="$(docker inspect -f '{{.State.Running}}' kiran-laptop 2>/dev/null || echo missing)"
+if [ "$kstate" = "true" ]; then
+  kout="$(uv run --quiet python -m woym.sandbox.customer --name kiran-laptop install v2.3.1)"
+elif [ "${WOYM_KNOWN:-0}" = "1" ]; then
+  kout="$(uv run --quiet python -m woym.sandbox.customer --name kiran-laptop up)"
+else
+  kout="skip"
+fi
+case "$kout" in
+  skip) done_ "not running (epilogue off)" ;;
+  *'"bizclock": "v2.3.1"'*) done_ "ok ($([ "$kstate" = true ] && echo reinstalled || echo started))" ;;
+  *) done_ "FAILED"; echo "$kout" >&2; exit 1 ;;
 esac
 
 echo "reset done in $(( $(ms) - T0 )) ms"

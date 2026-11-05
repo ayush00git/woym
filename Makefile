@@ -37,11 +37,13 @@ demo:
 images:
 	./scripts/pull-images.sh
 
+NAME ?= acme-laptop
+
 customer-up:
-	uv run python -m woym.sandbox.customer up
+	uv run python -m woym.sandbox.customer --name $(NAME) up
 
 customer-down:
-	uv run python -m woym.sandbox.customer down
+	uv run python -m woym.sandbox.customer --name $(NAME) down
 
 reset:
 	./scripts/reset.sh

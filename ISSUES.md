@@ -420,3 +420,23 @@ EOF
 - **Evidence:** Lead's shell output for the C10 commit (65 s run, "1 failed"); re-runs at HEAD 90f3fba: "241 passed, 1 skipped" twice. Other sessions were using Docker at the time (kiran-laptop and acme-laptop running; A cutting video).
 - **Impact:** There's probably an intermittent, timing-sensitive test, likely Docker or poll-interval bound under load. A judge running `make test` could see a spurious failure.
 - **Workaround / next step:** The lead now commits only when the test output contains no "failed", and prints the FAILED lines. Coworkers are asked to report any intermittent test they see; next time it fails, the test name gets logged here.
+
+## [2026-11-05 19:32 IST] sandbox (switch-7c) | Correction: the reset kill was at about 19:26, and likely caused the lead's 19:25 "1 failed"
+- **Status:** fixed (re: "reset.sh killed a live sandbox run that belonged to someone else")
+- **What happened:** That entry says "about 19:31 IST", but 19:31 was when I noticed it. By the agents' (C) clock, the kill happened just before 19:26. It most likely explains the lead's single unexplained "1 failed" full-suite run at about 19:25: a sandbox run was killed mid-test. Both re-runs passed, which fits.
+- **Evidence:** agents (C) message; the lead's 19:25 entry.
+- **Impact:** none now; reset only removes orphaned runs (owner pid dead, this checkout).
+- **Workaround / next step:** none. Also fixed in passing: my new epilogue tests used fixed 30 s / 20 s waits (sandbox suite 74 s instead of ~19 s). Waits are now capped by the timeout parameter; the suite is back to 25 s.
+
+## [2026-11-05 19:32 IST] platform (switch-ba) | A11 rough cut built: media/raw/rough-cut.mp4 (3:00, no narration)
+- **Status:** fixed (first version for review)
+- **What happened:** `uv run python scripts/video/build_rough_cut.py` builds 15 beats from docs/drafts/video-script.md (Time and Caption columns parsed live) and joins them: 180.0 s, 1920x1080, 25 fps, H.264 via libopenh264 (this ffmpeg has no libx264), 9.3 MB. My first build had caption bugs (the "(already in the page)" note showing, stray quotes, faint separators, captions covering the members crop, the terminal and the diagram footnote). I fixed them and rebuilt.
+- **Editorial choices the lead/B should check:**
+  1. Beat 1 (cold-open mock-up, ~12.5 s of animation) is fitted to 10 s at 1.25x. It's labelled MOCK-UP, not live footage.
+  2. Beat 3 splices the Members panel rows: admin, camera and user are cut out and the gap is closed. The caption says camera is the recording account.
+  3. Beat 14's terminal is a replay of take-905's real demo.py lines, sped up to 8 s and captioned "replay … sped up".
+  4. The run clock shows the demo clock (as the captions do: 0:03.5, 0:16.0, 0:18.2, 0:57), not "seconds since the report" as one edit note suggests. Change `clock_filter` if wanted.
+  5. Take beats play at real speed and then hold the last frame; the clock stops while held. Beat 9 is the only take speed-up (30.2 s → 16 s, 1.89x) with a ⏩ badge, plus a 4 s diff insert from `git diff main b6a243e -- src/`. Beat 11 freezes FIXED for ~11.5 s.
+  6. Beat 12 highlights the three arrows for the first half, then the "Never crosses" row.
+- **Slack:** each beat has ≥ 0.5 s after its narration at 2.3 words/s (tightest: beat 15, 0.5 s; beat 3, 0.7 s). Beat lengths follow the script exactly, so the total stays 3:00.
+- **Evidence:** media/raw/rough-cut.mp4, rough-cut-still-*.jpg, media/raw/cut-work/ (intermediate files).

@@ -4,6 +4,7 @@ way @triage would when the scripted humans post. No Switch, no Docker."""
 import importlib.util
 import sys
 import threading
+import time
 
 import pytest
 
@@ -327,3 +328,108 @@ def test_run_case_stops_fast_when_check_fails(tmp_path):
         demo.run_case(room, store, "fixed", True, "fixture", demo.Timeline(out=lambda s: None),
                       poll_s=0.01, open_timeout_s=2, check=check)
     assert e.value.code == 3
+
+
+# --- B14: epilogue (Kiran, acme-nepal, known fix) --------------------------------
+
+
+class NepalRoom:
+    """Kiran's room: a report opens case 2 on the known path; "yes" leads to KNOWN."""
+
+    def __init__(self, store, branch_off=None, card=True, delay=0.01):
+        self.store, self.branch_off, self.card, self.delay = store, branch_off, card, delay
+        self.thread, self.posts, self.case = [], [], None
+
+    def _walk(self, steps, then=None):
+        def go():
+            for st in steps:
+                c = self.store.get(self.case.id)
+                c.step = st
+                c.history.append(f"x:{st.value}")
+                self.store.save(c)
+                threading.Event().wait(self.delay)
+            if then:
+                then()
+        threading.Thread(target=go, daemon=True).start()
+
+    def __call__(self, who, text, thread):
+        self.posts.append((who, text, thread))
+        self.thread.append((who, text))
+        if thread is None:
+            self.case = self.store.open_case("nepal-room", "k-root", who)
+            self._walk([S.ENV_REQUESTED, S.CONSENT_PENDING])
+            return "k-root"
+        if self.branch_off:
+            self._walk([S.ENV_RECEIVED, self.branch_off])
+        else:
+            card = lambda: self.thread.append(("triage", "#### 🧾 KNOWN ISSUE · already fixed · case #2 · matches case #1"))
+            self._walk([S.ENV_RECEIVED, S.KNOWN_FIXED], then=card if self.card else None)
+        return "k-yes"
+
+    def read(self, root):
+        return list(self.thread)
+
+
+def _store_with_fixed_case(tmp_path):
+    store = CaseStore(tmp_path / "cases.json")
+    c = store.open_case("room", "root-1", "meera")
+    c.step = S.FIXED_ON_CUSTOMER
+    store.save(c)
+    return store
+
+
+def _epi(tmp_path, room, known=True):
+    kdb = tmp_path / "known.json"
+    if known:
+        kdb.write_text("{}")
+    lines = []
+    code = 0
+    try:
+        demo.run_epilogue(room, room.store, demo.Timeline(out=lines.append), room.read,
+                          known_db=kdb, poll_s=0.01, timeout_s=1)
+    except demo.DemoFailed as e:
+        code = e.code
+        lines.append(str(e))
+    return code, "\n".join(lines)
+
+
+def test_epilogue_happy_path(tmp_path):
+    store = _store_with_fixed_case(tmp_path)
+    room = NepalRoom(store)
+    code, out = _epi(tmp_path, room)
+    assert code == 0
+    assert [(w, t) for w, t, _ in room.posts] == [("kiran", demo.KIRAN_REPORT), ("kiran", "yes")]
+    assert room.posts[1][2] == "k-root"  # the yes is in Kiran's thread
+    assert "case 2 opened by @triage (reporter kiran)" in out
+    assert "*** KNOWN ISSUE · already fixed *** (card visible in Kiran's thread)" in out
+    assert out.count("[SCRIPTED]") == 2
+
+
+def test_epilogue_waits_for_known_record(tmp_path):
+    room = NepalRoom(_store_with_fixed_case(tmp_path))
+    kdb = tmp_path / "known.json"
+    with pytest.raises(demo.DemoFailed, match="known.json"):
+        demo.run_epilogue(room, room.store, demo.Timeline(out=lambda s: None), room.read,
+                          known_db=kdb, poll_s=0.01, timeout_s=1)
+    assert room.posts == []  # Kiran never posts before the record exists
+
+
+def test_epilogue_case_leaving_known_path_fails_clearly(tmp_path):
+    code, out = _epi(tmp_path, NepalRoom(_store_with_fixed_case(tmp_path), branch_off=S.BISECTING))
+    assert code == 1 and "left the known-fix path at step bisect" in out
+
+
+def test_epilogue_missing_card_times_out(tmp_path):
+    code, out = _epi(tmp_path, NepalRoom(_store_with_fixed_case(tmp_path), card=False))
+    assert code == 1 and "KNOWN ISSUE · already fixed card" in out
+
+
+def test_ready_count_waits_for_two_lines(tmp_path):
+    code = ("import time; print('t connected: rooms=[a]', flush=True); time.sleep(1.0); "
+            "print('t connected: rooms=[b]', flush=True); time.sleep(30)")
+    procs = demo.AgentProcs({"triage": _agent(code)}, logs=tmp_path / "l", run_dir=tmp_path / "r",
+                            ready_count={"triage": 2})
+    t0 = time.monotonic()
+    procs.start(timeout_s=10, settle_s=0)
+    assert time.monotonic() - t0 >= 0.9  # didn't return on the first line
+    procs.stop()
