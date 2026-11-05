@@ -188,3 +188,18 @@ EOF
 - **Evidence:** results.json S5.list_participants vs events.jsonl
 - **Impact:** fixed in woym/switch/client.py (mapped by name); tests updated.
 - **Workaround / next step:** none.
+
+## [2026-11-05 18:57 IST] sandbox (switch-7c) | Live run 1: demo.py stopped agents before the CONFIRMED card was posted
+- **Status:** fixed
+- **What happened:** The first live `demo.py --until confirmed --fixer fixture` passed (exit 0, 15.7 s), but when I read the Mattermost thread back, @triage's "CONFIRMED ON BOTH MACHINES" card was missing. demo.py stopped the agents as soon as var/cases.json said `confirmed`, and @triage stores the step before it posts the card.
+- **Evidence:** thread root zxusyq8hdifqxgbns83f6h6fta ends with acme-env's "tz=UTC → pass ✅, as-is → fail ❌" message; no triage card follows it.
+- **Impact:** The M1 money shot would have been missing from the recording.
+- **Workaround / next step:** demo.py now reads the thread (Mattermost API, dev's token, read-only) and waits until the final card (CONFIRMED / FIXED) is visible before it moves on or stops the agents; timeout 20 s → exit 1. tests/sandbox/test_sandbox_demo.py covers it with a fake thread where cards land after the step.
+
+## [2026-11-05 18:58 IST] lead | Live demo run 2 broken by a credentials rewrite mid-run (coordination failure)
+- **Status:** worked-around
+- **What happened:** At 18:57:10 `var/switch/credentials.json` was rewritten to room "woym-selftest" (bbf26bd6…) while B's live `demo.py` was running in acme-support (c412e4b6…). The rewrite came from A testing the fresh-room command (A7) that the lead had assigned. The agents stayed in the old room, but `humans.py` reloads creds on every call, so Meera's "yes" went to the new channel with an old root id and Mattermost returned 400 "Invalid ChannelId for RootId parameter". The demo exited 3, as designed.
+- **Evidence:** credentials.json mtime 18:57:10; room.name "woym-selftest"; B's run log, consent step at 7.0 s.
+- **Impact:** One failed live run. No product bug, but anything that rewrites creds while agents run splits humans from agents.
+- **Root cause:** The lead assigned A7 without a rule for who may change the shared live stack.
+- **Workaround / next step:** A restores acme-support as the active room. New rule in docs/contracts.md §8: a live lock held by demo.py; setup refuses while it's held; fresh rooms change the active room only with --activate; tests never touch the real creds. demo.py also snapshots the room id and fails fast if creds change.
