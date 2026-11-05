@@ -91,7 +91,9 @@ make demo FIXER=fixture   # no Claude needed: a stored, clearly labelled referen
 make demo                 # the real thing: Claude Code writes the fix
 ```
 
-Then open Mattermost at http://localhost:8065 and watch `#acme-support`. `make reset` puts everything back to the pre-demo state in under a second. `make test` runs the suite (200+ tests, including a full flow through the real client against a fake Switch server).
+Then open Mattermost at http://localhost:8065 and watch `#acme-support`. `make reset` puts everything back to the pre-demo state in under a second.
+
+From a wiped stack (`./infra/switch/down.sh -v`, which removes the volumes; plain `make down` keeps them), the judge path needs no human steps. With images already pulled, `make up` took 12 s and `make setup` 7 s on our machine. Setup notices a new stack and throws away stale cached ids and keys on its own. `make test` runs the suite (200+ tests, including a full flow through the real client against a fake Switch server).
 
 ## Honest notes
 
