@@ -295,40 +295,33 @@ EOF
 ## [2026-11-05 19:10 IST] agents (switch-90), logged by lead | Cross-review C6: 7 findings in switch/ and sandbox/ code
 - **Status:** open. #3 is mitigated in agents (dedupe by message id); the rest are assigned.
 - **What happened:** A read-only review of woym/switch, woym/sandbox, scripts/demo.py and scripts/reset.sh found no injection or traversal holes, but these 7 issues:
-  1. **[platform, medium]** Cached human participant ids, reg keys and MM tokens go stale after GNU Make 4.4.1
-Built for x86_64-redhat-linux-gnu
-Copyright (C) 1988-2023 Free Software Foundation, Inc.
-License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>
-This is free software: you are free to change and redistribute it.
-There is NO WARRANTY, to the extent permitted by law.. The new bridge UUID means triage rejects every human command.
-  2. **[platform, medium]** On a cold stack, setup may need a human message to learn sender ids, which leaves a MANUAL step and makes ./scripts/setup.sh
-[setup] gateway user dev ok (0c0929bd-b608-4bf6-a611-1821677eb7ca)
-[setup] gateway user meera ok (91765913-3496-4a7f-83a3-daa02d2b8147)
-[setup] agent triage ok (kept)
-[setup] agent runner ok (kept)
-[setup] agent fixer ok (kept)
-[setup] agent acme-env ok (kept)
-[setup] mattermost user dev ok
-[setup] mattermost user meera ok
-[setup] room acme-support-take1 ok (kept)
-[setup] acme-env added to room by meera
-[setup] link dev's mattermost account -> 200
-[setup] link meera's mattermost account -> 200
-[setup] triage addressing: anyone
-[setup] acme-env addressing: meera + meera's agents + triage (set by meera)
-[setup] display name 'triage · owner: dev (vendor)' -> 200
-[setup] display name 'runner · owner: dev (vendor)' -> 200
-[setup] display name 'fixer · owner: dev (vendor)' -> 200
-[setup] display name 'acme-env · owner: meera (Acme)' -> 200
-[setup] avatars: vendor agents blue, acme-env amber
-[setup] camera viewer in acme-support-take1 only (left: town-square:400)
-[setup] credentials -> /home/ayush/Documents/projects/switch/var/switch/credentials.json
-[setup] done, no manual steps exit 2. Not yet verified live.
-  3. **[platform, medium]** Undocumented whether  is inclusive. A replayed report could open a second case.
-  4. **[sandbox, medium]** Demo preflight doesn't check node images. On a cold machine the first  pulls inside the 90 s timeout and can fail as a sandbox error.
+  1. **[platform, medium]** Cached human participant ids, reg keys and MM tokens go stale after a stack wipe (`make down` with volumes removed). The new bridge UUID means triage rejects every human command.
+  2. **[platform, medium]** On a cold stack, setup may need a human message to learn sender ids, which leaves a MANUAL step and makes `make setup` exit 2. Not yet verified live.
+  3. **[platform, medium]** Undocumented whether the client's `start_from` cursor is inclusive. A replayed report could open a second case.
+  4. **[sandbox, medium]** Demo preflight doesn't check node images. On a cold machine the first sandbox run pulls inside the 90 s timeout and can fail as a sandbox error.
   5. **[sandbox, low-medium]** An agent that dies after its ready line isn't detected; the demo waits out the whole step timeout.
   6. **[platform, low]** credentials.tmp is written 0644 and chmod-ed afterwards, so secrets are briefly world-readable, and a fixed tmp name can race.
   7. **[platform, low]** Predictable Gateway/MM user passwords (stack bound to 127.0.0.1 only).
 - **Evidence:** file:line refs in the review message: setup.py:97–222, client.py:241, creds.py:67, demo.py:110–122/325, runner.py:106.
 - **Impact:** 1, 2 and 4 hit exactly the judge path (fresh clone on a cold machine).
 - **Workaround / next step:** platform takes 1, 2, 3, 6 and 7, then runs a full cold-stack test (down -v → up → setup → demo). Sandbox takes 4 and 5.
+
+## [2026-11-05 19:10 IST] agents (switch-90) | WS resume cursor may replay an event; agents now drop already-seen message ids
+- **Status:** worked-around (Switch semantics unverified)
+- **What happened:** In the C6 review I found that WsSwitchClient reconnects with `start_from=<last cursor>` (woym/switch/client.py:_ws_url). Whether start_from is inclusive isn't documented in docs/switch-notes.md. If it is, every reconnect re-delivers the last event: a replayed report would open a second case, and a replayed request would re-run a sandbox.
+- **Evidence:** docs/switch-notes.md §4 lists `start_from=head|<seq>` with no inclusivity note.
+- **Impact:** Possible duplicate case or duplicate docker runs after a network blip during a live demo.
+- **Workaround / next step:** woym/agents/base.py:Agent.handle skips message ids it has already handled (bounded at 2000), and triage won't open a case for a report that already has one, which also covers a restarted triage. Test: tests/agents/test_flow.py::test_redelivered_events_are_handled_once. Platform to confirm the semantics live (reported to the lead as C6 #3).
+
+## [2026-11-05 19:11 IST] lead | Lead accidentally ran `make setup` (and harmless commands) via an unquoted heredoc
+- **Status:** fixed (no damage found); process corrected
+- **What happened:** At 19:10:26 the lead appended an ISSUES.md entry with an *unquoted* heredoc (needed for `$(date)`), so bash ran every backtick span in the text as a command:
+  - `make down -v`: the `-v` was read as make's own `--version`, so nothing went down;
+  - `make setup`: ran fully against the live stack;
+  - `docker run`: usage error, harmless;
+  - a `start_from=<cursor>` span: syntax error, harmless.
+  The command output was pasted into that entry, which the lead has since repaired.
+- **Evidence:** The command output was captured inline in the entry (GNU Make version banner, full `[setup] …` log ending "done, no manual steps"). credentials.json mtime 19:10:26. Containers "Up 22 minutes" right afterwards; /health ok.
+- **Impact:** setup is idempotent. Every gateway user, agent and room reported "ok (kept)", and addressing rules, identity links, display names, avatars and the camera user were re-applied with the same values. No live lock was held, or setup would have refused. No demo or recording was running at that moment as far as the lead can tell. Coworkers have been told to check their state.
+- **Root cause:** Free text containing backticks, written in an unquoted heredoc.
+- **Workaround / next step:** The lead now always uses a quoted heredoc (`<<'EOF'`) for log text and adds the timestamp separately with printf. Coworkers have been told the same.
