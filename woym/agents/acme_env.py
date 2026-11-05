@@ -25,6 +25,8 @@ from woym.case.consent import ConsentRequest, Verdict, evaluate
 from woym.contracts import ENV_KEYS, CustomerMachine, MessageEvent, Step, SwitchClient
 
 ALLOWED_OVERRIDES = {"tz", "lang"}
+# Consent wording when triage may answer from a known fix (WOYM_KNOWN): runs aren't certain.
+KNOWN_RUNS_NOTE = "I'd also run the repro on this machine if needed."
 
 
 @dataclass
@@ -78,7 +80,8 @@ class AcmeEnvAgent(Agent):
             req = ConsentRequest(case_id, room, thread or event.message_id, self.customer, values, self.customer_id)
             st.pending.append(_Pending("env", req))
             await self.announce(room, thread, case_id, Step.CONSENT_PENDING,
-                                card.consent_prompt(case_id, self.customer, values, config.AGENT_TRIAGE),
+                                card.consent_prompt(case_id, self.customer, values, config.AGENT_TRIAGE,
+                                                    runs_note=KNOWN_RUNS_NOTE if kv.get("known") == "1" else None),
                                 keys=list(values))
 
         elif step == Step.CONFIRM_REQUESTED:

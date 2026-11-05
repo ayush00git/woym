@@ -233,7 +233,9 @@ def failed(case_id: int, why: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def consent_prompt(case_id: int, customer: str, values: dict[str, str], requester: str, runs: int = 2) -> str:
+def consent_prompt(case_id: int, customer: str, values: dict[str, str], requester: str, runs: int = 2,
+                   runs_note: str | None = None) -> str:
+    """`runs_note` replaces the repro-runs sentence (known-fix path: runs only if needed)."""
     rows = ["| fact | value |", "|:--|:--|"]
     for key in ENV_KEYS:
         if key in values:
@@ -245,7 +247,8 @@ def consent_prompt(case_id: int, customer: str, values: dict[str, str], requeste
             "",
             *rows,
             "",
-            f"I'd also run the repro **{runs}×** on this machine (with `tz=UTC`, then as-is). Nothing else leaves it.",
+            (f"{runs_note} Nothing else leaves it." if runs_note else
+             f"I'd also run the repro **{runs}×** on this machine (with `tz=UTC`, then as-is). Nothing else leaves it."),
             "**Reply `yes` in this thread** to allow, or `no` to refuse.",
         ]
     )

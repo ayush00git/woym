@@ -118,7 +118,7 @@ class TriageAgent(Agent):
             await self._hop_out(case, Step.ENV_REQUESTED, self._customer(case.room_id)[1],
                                 f"Case #{case.id} opened. Please share these environment facts, with your owner's "
                                 "consent, so I can check them against fixes we've already verified.",
-                                keys=list(ENV_KEYS))
+                                keys=list(ENV_KEYS), known=True)
             return
         self._advance(case, Step.SANDBOX_RUN)
         await self._hop_out(case, Step.SANDBOX_RUN, config.AGENT_RUNNER,
@@ -365,14 +365,19 @@ def main() -> None:
     except FileNotFoundError:
         pass
     customers: dict[str, tuple[str, str]] = {}
+    extra: list[str] = []  # other customer rooms to serve, only with WOYM_KNOWN=1
     try:
-        rooms = creds.load().get("rooms", {})
+        data = creds.load()
+        rooms, active = data.get("rooms", {}), data.get("room", {}).get("id")
         for room_name, (human, agent, _container) in config.CUSTOMERS.items():
             if room_name in rooms:
                 customers[rooms[room_name]["id"]] = (human, agent)
+                if config.KNOWN_ENABLED and rooms[room_name]["id"] != active:
+                    extra.append(room_name)
     except FileNotFoundError:
         pass
-    run_agent(lambda c: TriageAgent(c, human_ids=ids, customers=customers), config.AGENT_TRIAGE)
+    run_agent(lambda c: TriageAgent(c, human_ids=ids, customers=customers), config.AGENT_TRIAGE,
+              extra_rooms=extra)
 
 
 if __name__ == "__main__":

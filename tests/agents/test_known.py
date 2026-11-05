@@ -4,8 +4,9 @@ record with zero sandbox runs, after the evidence is re-read from room history."
 
 import pytest
 
-from fakes import FIX_SHA, FakeBus, FakeFixer, FakeMachine, FakeSandbox
-from woym.agents.acme_env import AcmeEnvAgent
+from fakes import FIX_SHA, FakeBus, FakeClient, FakeFixer, FakeMachine, FakeSandbox
+from woym.agents.acme_env import KNOWN_RUNS_NOTE, AcmeEnvAgent
+from woym.agents.base import MultiRoomClient
 from woym.agents.fixer_agent import FixerAgent
 from woym.agents.runner_agent import RunnerAgent
 from woym.agents.triage import TriageAgent
@@ -19,8 +20,28 @@ KIRAN_ENV = Env(node="20", lang="ne_NP.UTF-8", os="alpine", bizclock="v2.3.1", t
 MEERA_ONLY = ("meera", "Asia/Kolkata", "en_IN.UTF-8", "bookworm", "Meera")
 
 
+class RoomBound(FakeClient):
+    """A per-room connection: it may only ever post into its own room."""
+
+    def __init__(self, bus, name, room):
+        super().__init__(bus, name)
+        self.room = room
+
+    async def post(self, room_id, text, thread_id=None):
+        assert room_id == self.room, f"{self.name}'s {self.room} connection posted into {room_id}"
+        return await super().post(room_id, text, thread_id)
+
+    async def send_targeted(self, room_id, targets, text, thread_id=None):
+        assert room_id == self.room, f"{self.name}'s {self.room} connection sent into {room_id}"
+        return await super().send_targeted(room_id, targets, text, thread_id)
+
+    async def thread(self, room_id, thread_id):
+        assert room_id == self.room
+        return await super().thread(room_id, thread_id)
+
+
 class TwoRooms:
-    def __init__(self, tmp_path, known_on=True, kiran_env=KIRAN_ENV):
+    def __init__(self, tmp_path, known_on=True, kiran_env=KIRAN_ENV, multiroom=False):
         self.bus = bus = FakeBus(room=R1)
         bus.members = {R1: {"triage", "runner", "fixer", "acme-env"}, R2: {"triage", "runner", "nepal-env"}}
         # (runner in room 2 too: if no known fix matches, Kiran's case is investigated normally)
@@ -30,7 +51,11 @@ class TwoRooms:
         self.meera_machine, self.kiran_machine = FakeMachine(), FakeMachine()
         self.kiran_machine.env = kiran_env
         kw = lambda n: dict(guard=bus.guard(n), sleep=bus.clock.sleep)  # noqa: E731
-        self.triage = TriageAgent(bus.client("triage"), store=self.store, known_store=self.known, known_on=known_on,
+        tri_client = bus.client("triage")
+        if multiroom:  # one connection per room, as live (platform's two_rooms kill test)
+            self.tri_rooms = {R1: RoomBound(bus, "triage", R1), R2: RoomBound(bus, "triage", R2)}
+            tri_client = MultiRoomClient(self.tri_rooms)
+        self.triage = TriageAgent(tri_client, store=self.store, known_store=self.known, known_on=known_on,
                                   customers={R1: ("meera", "acme-env"), R2: ("kiran", "nepal-env")}, **kw("triage"))
         agents = [
             self.triage,
@@ -218,3 +243,108 @@ async def test_evidence_check_through_real_client_and_read_context(tmp_path):
             await asyncio.gather(*tasks, return_exceptions=True)
             for c in (tri, acme):
                 await c.aclose()
+
+
+
+# ---------------------------------------------------------------- post-freeze: wording, multi-room
+
+async def test_known_path_consent_wording(tmp_path):
+    w = TwoRooms(tmp_path)
+    r1 = await w.case1_fixed()
+    first = next(p.text for p in w.bus.log if p.room == R1 and "can I share this?" in p.text)
+    assert "**2×**" in first and KNOWN_RUNS_NOTE not in first           # no records yet: today's wording
+    await w.kiran_case()
+    second = next(p.text for p in w.bus.log if p.room == R2 and "can I share this?" in p.text)
+    assert KNOWN_RUNS_NOTE in second and "2×" not in second
+    assert "Asia/Kathmandu" in second                                   # Kiran still sees all 5 values
+
+
+async def test_flag_off_consent_and_env_req_unchanged(tmp_path):
+    w = TwoRooms(tmp_path, known_on=False)
+    await w.case1_fixed()
+    w.bus.human("kiran", "@triage orders after 17:20 settle Monday", room=R2)
+    await w.bus.settle()
+    reqs = [p.text for p in w.bus.log if "step=env_req" in p.text]
+    assert reqs and all("known=" not in t for t in reqs)
+    assert all(KNOWN_RUNS_NOTE not in p.text for p in w.bus.log)
+
+
+async def test_triage_over_multiroom_client_never_crosses_rooms(tmp_path):
+    w = TwoRooms(tmp_path, multiroom=True)
+    await w.case1_fixed()
+    root, case2 = await w.kiran_case()
+    assert case2.step == Step.KNOWN_FIXED
+    # each room's triage traffic went through that room's own connection (RoomBound asserts the room)
+    tri = [p for p in w.bus.log if p.sender == "triage"]
+    assert {p.room for p in tri if "case=1 " in p.text} == {R1}
+    assert {p.room for p in tri if "case=2 " in p.text} == {R2}
+    assert any("KNOWN ISSUE" in p.text for p in tri if p.room == R2)
+
+
+class _Rec:
+    def __init__(self, name):
+        self.name, self.calls = name, []
+
+    async def run(self, handler):
+        self.calls.append(("run", handler))
+
+    async def post(self, room_id, text, thread_id=None):
+        self.calls.append(("post", room_id))
+        return "m"
+
+    async def send_targeted(self, room_id, targets, text, thread_id=None):
+        self.calls.append(("send", room_id))
+        return {}
+
+    async def participants(self, room_id):
+        self.calls.append(("participants", room_id))
+        return []
+
+    async def thread(self, room_id, thread_id):
+        self.calls.append(("thread", room_id))
+        return []
+
+    async def aclose(self):
+        self.calls.append(("close",))
+
+
+async def test_multiroom_client_routes_by_room():
+    a, b = _Rec("triage"), _Rec("triage")
+    m = MultiRoomClient({R1: a, R2: b})
+    assert m.name == "triage"
+    await m.post(R2, "x")
+    await m.send_targeted(R1, ["runner"], "y")
+    await m.thread(R2, "t")
+    await m.participants(R1)
+    assert a.calls == [("send", R1), ("participants", R1)]
+    assert b.calls == [("post", R2), ("thread", R2)]
+    with pytest.raises(KeyError, match="not connected to room nope"):
+        await m.post("nope", "z")
+    handler = object()
+    await m.run(handler)
+    assert ("run", handler) in a.calls and ("run", handler) in b.calls
+    await m.aclose()
+    assert ("close",) in a.calls and ("close",) in b.calls
+    with pytest.raises(ValueError):
+        MultiRoomClient({})
+
+
+@pytest.mark.parametrize("flag,expected", [(False, []), (True, ["acme-nepal"])])
+def test_triage_main_serves_side_room_only_with_flag(monkeypatch, flag, expected):
+    from woym import config
+    from woym.agents import base, triage
+    from woym.switch import creds
+
+    data = {"room": {"id": "rid-main"},
+            "rooms": {"acme-support": {"id": "rid-main"}, "acme-nepal": {"id": "rid-np"}},
+            "humans": {"kiran": {"switch_participant_id": "@switch-mattermost-b-kiran:localhost"}}}
+    monkeypatch.setattr(creds, "load", lambda *a, **k: data)
+    monkeypatch.setattr(config, "KNOWN_ENABLED", flag)
+    monkeypatch.setitem(config.CUSTOMERS, "acme-support", ("meera", "acme-env", "acme-laptop"))
+    got = {}
+    monkeypatch.setattr(base, "run_agent", lambda make, name, **kw: got.update(kw, name=name, make=make))
+    triage.main()
+    assert got["name"] == "triage" and got["extra_rooms"] == expected
+    agent = got["make"](_Rec("triage"))
+    assert agent.customers == {"rid-main": ("meera", "acme-env"), "rid-np": ("kiran", "nepal-env")}
+    assert agent.human_ids["kiran"].endswith("-kiran:localhost")

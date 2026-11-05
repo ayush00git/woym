@@ -125,9 +125,54 @@ async def to_thread(fn, *args):
     return await asyncio.to_thread(fn, *args)
 
 
-def run_agent(make: Callable[[SwitchClient], Agent], name: str, room: str | None = None) -> None:
+class MultiRoomClient:
+    """One agent in several rooms (verified live by platform: var/killtest/two_rooms.json).
+
+    Wraps one client per room: its own connection and room claim, same agent
+    credentials. run() runs them all with the same handler; every other call
+    routes by room_id, so a post can never land in the wrong room. (Never one
+    connection that switches rooms: the side room goes deaf, or posts race.)"""
+
+    def __init__(self, clients: dict[str, SwitchClient]) -> None:
+        if not clients:
+            raise ValueError("MultiRoomClient needs at least one room")
+        self.clients = clients
+        self.name = next(iter(clients.values())).name
+
+    def _for(self, room_id: str) -> SwitchClient:
+        try:
+            return self.clients[room_id]
+        except KeyError:
+            raise KeyError(f"{self.name} is not connected to room {room_id}") from None
+
+    async def run(self, handler) -> None:
+        await asyncio.gather(*(c.run(handler) for c in self.clients.values()))
+
+    async def post(self, room_id: str, text: str, thread_id: str | None = None) -> str:
+        return await self._for(room_id).post(room_id, text, thread_id)
+
+    async def send_targeted(self, room_id: str, targets: list[str], text: str,
+                            thread_id: str | None = None) -> dict[str, str]:
+        return await self._for(room_id).send_targeted(room_id, targets, text, thread_id)
+
+    async def participants(self, room_id: str):
+        return await self._for(room_id).participants(room_id)
+
+    async def thread(self, room_id: str, thread_id: str):
+        return await self._for(room_id).thread(room_id, thread_id)
+
+    async def aclose(self) -> None:
+        for c in self.clients.values():
+            close = getattr(c, "aclose", None)
+            if close:
+                await close()
+
+
+def run_agent(make: Callable[[SwitchClient], Agent], name: str, room: str | None = None,
+              extra_rooms: list[str] | tuple[str, ...] = ()) -> None:
     """`python -m woym.agents.<name>` entry point using A's real client. `room` is a
-    room NAME from credentials.json `rooms` (default: the active room)."""
+    room NAME from credentials.json `rooms` (default: the active room).
+    `extra_rooms` (names): also serve these rooms, one connection each."""
     from woym.switch import creds
     from woym.switch.client import WsSwitchClient
 
@@ -141,6 +186,17 @@ def run_agent(make: Callable[[SwitchClient], Agent], name: str, room: str | None
             raise SystemExit(f"room {room!r} not in credentials.json rooms ({sorted(rooms)}); run setup for it")
         a = data["agents"][name]
         client = WsSwitchClient(name, a["id"], a["api_key"], rooms[room]["id"])
+    if extra_rooms:
+        data = creds.load()
+        a = data["agents"][name]
+        clients: dict[str, SwitchClient] = {client.room_id: client}
+        for extra in extra_rooms:
+            rid = data["rooms"][extra]["id"]
+            if rid not in clients:
+                clients[rid] = WsSwitchClient(name, a["id"], a["api_key"], rid)
+        if len(clients) > 1:
+            log.info("%s serving %d rooms: %s", name, len(clients), ", ".join(clients))
+            client = MultiRoomClient(clients)
     agent = make(client)
     log.info("%s starting (room %s)", name, getattr(client, "room_id", "?"))
 
