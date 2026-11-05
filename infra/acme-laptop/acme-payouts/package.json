@@ -1,0 +1,13 @@
+{
+  "name": "acme-payouts",
+  "version": "0.9.4",
+  "private": true,
+  "description": "Acme's merchant payout scheduler (demo app on the customer machine)",
+  "main": "src/schedule.js",
+  "scripts": {
+    "repro": "node repro.js"
+  },
+  "dependencies": {
+    "bizclock": "2.3.1"
+  }
+}

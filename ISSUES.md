@@ -109,3 +109,17 @@ EOF
 - **Evidence:** tests/case/test_state.py::test_full_flow_completes_under_hop_limit
 - **Impact:** None after the fix.
 - **Workaround / next step:** `config.MAX_HOPS_PER_CASE = 20`; contracts.py and docs/contracts.md updated to match.
+
+## [2026-11-05 20:10 IST] agents (switch-90) | ClaudeFixer live run: works (1 run, 24 s, $0.08)
+- **Status:** fixed (verified once)
+- **What happened:** `WOYM_LIVE_CLAUDE=1 uv run pytest -s tests/agents/test_fixer.py::test_live_claude_fixer` cloned main @ 2341e84365, ran `claude -p --model sonnet --allowedTools "Read,Edit,Write,Glob,Grep,Bash(node *),Bash(npm test*)" --output-format json --strict-mcp-config --setting-sources project` with TZ=Asia/Kolkata in the environment, and finished in 24 s for $0.08. Our checks passed (suite green under TZ=Asia/Kolkata and TZ=UTC; the changed test fails on the original src). It pushed fix/case-99 @ c564087a88, with the sha read from ls-remote.
+- **Evidence:** It edited src/index.js and the EXISTING test/cutoff.test.js (it didn't create a new file). Test name: "a Friday order before the cutoff is paid Friday in half-hour offset zones". 1 tool call was denied (not on the allow list; it carried on).
+- **Impact:** None. The output isn't deterministic: a later run may choose a different test or fix, but the same checks gate it. Summary text from the model contains backticks; the card handles them.
+- **Workaround / next step:** The remote used was a tmp copy, not var/remotes. Adding the deliberate `Write` and `Glob,Grep` (read-only) tools to the PLAN's allowedTools list is a deviation, so the fixer can create a new test file.
+
+## [2026-11-05 20:40 IST] sandbox (switch-7c) | LANG=en_IN.UTF-8 is only an env var; the locale isn't generated
+- **Status:** wontfix (doesn't affect the demo)
+- **What happened:** The node `*-slim` and alpine images don't ship the en_IN glibc locale. LANG is set in acme-laptop and in sandbox runs, but `locale -a` wouldn't list it. Node's Intl uses its bundled ICU, not libc locales, so bizclock's behaviour doesn't depend on it.
+- **Evidence:** infra/acme-laptop/Dockerfile (no `locales` package); the bisect shows `lang` doesn't flip the result.
+- **Impact:** Someone checking `locale` inside the container would see the locale missing. The "lang doesn't matter" result is still true for this bug.
+- **Workaround / next step:** none. Mention it in the README's honest notes if anyone asks.
