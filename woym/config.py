@@ -57,6 +57,6 @@ VENDOR_ENV = Env(node="22", lang="en_US.UTF-8", os="alpine", bizclock="main", tz
 # Modes
 FIXER_MODE = os.environ.get("FIXER", "claude")  # "claude" | "fixture"
 TRIAGE_LLM = os.environ.get("TRIAGE_LLM", "off")  # "off" | "claude"
-MAX_HOPS_PER_CASE = 12
+MAX_HOPS_PER_CASE = 20  # 16 hops in the full flow (docs/contracts.md §3) + slack
 MIN_SECONDS_BETWEEN_SENDS = 2.0
 RUN_TIMEOUT_S = 90

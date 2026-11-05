@@ -32,3 +32,80 @@ EOF
 - **Evidence:** `.hack/ideas/builder-r3.md`, `.hack/decision.md` (Fallbacks section)
 - **Impact:** If item 1 fails, Use of Switch falls to about 7/10 and the pitch changes from "Switch-enforced" to "owner-scoped".
 - **Workaround / next step:** Kill test A2 tonight; B3 checks the alpine TZ; C2 checks `claude -p`.
+
+## [2026-11-05 18:45 IST] agents (switch-90) | `claude -p` non-interactive check (risk 5): works
+- **Status:** fixed (verified)
+- **What happened:** `claude -p` (Claude Code 2.1.318) runs non-interactively from `subprocess.run(..., stdin=DEVNULL)`. No `--permission-mode` needed: tools in `--allowedTools` run unattended, and tools not on the list are refused (recorded in `permission_denials` in the JSON output) without hanging.
+- **Evidence:**
+  - Read test: `claude -p "Read a.txt and reply with only its contents." --allowedTools Read --output-format json` → rc 0, wall 10.4 s, default model opus-5-5, $0.25 (30k cache-creation tokens from user plugins/hooks).
+  - Edit test: `claude -p "In b.py change 1 to 2. Reply 'done'." --allowedTools Read,Edit --model sonnet --output-format json --strict-mcp-config --setting-sources project` → rc 0, wall 15.0 s, $0.04, file edited. The model first tried Bash `sed`, which was denied, then used Edit.
+- **Impact:** None on the plan. Cost note: without `--model sonnet --strict-mcp-config --setting-sources project`, every call loads the user's plugins/MCP config (about 6x the cost).
+- **Workaround / next step:** ClaudeFixer will use `--model sonnet --strict-mcp-config --setting-sources project --output-format json`, with a timeout of 300 s. `Bash(node *)` patterns are untested until the bizclock fixture lands.
+
+## [2026-11-05 19:00 IST] sandbox (switch-7c) | Verified: node alpine and bookworm honour TZ=Asia/Kolkata (risk 6 closed)
+- **Status:** fixed (risk closed; nothing to work around)
+- **What happened:** `getTimezoneOffset()` is -330 on node:22-alpine, node:20-alpine, node:20-bookworm-slim and node:22-bookworm-slim. Node ships its own ICU time zone data, so alpine needs no tzdata package.
+- **Evidence:** `docker run --rm --network none -e TZ=Asia/Kolkata node:22-alpine node -e "console.log(new Date().getTimezoneOffset(), Intl.DateTimeFormat().resolvedOptions().timeZone)"` printed `-330 Asia/Calcutta`; the other three images printed the same.
+- **Impact:** None on the plan. Note that `Intl` reports the ICU canonical name `Asia/Calcutta`, not `Asia/Kolkata`, so cards should show the TZ env value, not Intl's name. A warm run with all the hardening flags takes about 0.22 s; a cold pull takes about 6 s per image.
+- **Workaround / next step:** none needed.
+
+## [2026-11-05 19:10 IST] sandbox (switch-7c) | Intl reports Asia/Kolkata as "Asia/Calcutta"
+- **Status:** worked-around
+- **What happened:** In node, `Intl.DateTimeFormat().resolvedOptions().timeZone` returns the ICU canonical alias `Asia/Calcutta` when TZ=Asia/Kolkata.
+- **Evidence:** see the entry above ("Verified: node alpine and bookworm honour TZ=Asia/Kolkata").
+- **Impact:** A probe that read the zone from Intl would show "Asia/Calcutta" on the lineup card and wouldn't match the customer's real setting.
+- **Workaround / next step:** `DockerCustomerMachine.probe()` reads `tz` from the TZ env var (`printenv TZ`), never from Intl.
+
+## [2026-11-05 19:20 IST] agents (switch-90) | Hop limit 12 is lower than the §3 flow needs (13)
+- **Status:** open (needs a lead decision)
+- **What happened:** Counting agent→agent targeted sends in docs/contracts.md §3 (steps 2,3,5,8,10,11,12,13,15,16,17,18,19) gives 13 hops for one full M2 case. `config.MAX_HOPS_PER_CASE = 12`, so the guard would stop the case at step 19 (verify_req). If posts to the room/human (steps 4,6,20) also count, it's 16.
+- **Evidence:** `tests/case/test_state.py::test_full_flow_agent_hops_vs_limit` shows it (13th hop raises GuardError at 12, passes at 13).
+- **Impact:** M2 would stop just before FIXED ON MEERA'S MACHINE.
+- **Workaround / next step:** Proposed `MAX_HOPS_PER_CASE = 16`. Until then the per-agent `SendGuard` caps each agent at 12 (triage sends only 7), and triage's case-wide counter takes `max_hops` from config.
+
+## [2026-11-05 19:20 IST] platform (switch-ba) | Starting the Switch stack blocked by the permission checker
+- **Status:** blocked
+- **What happened:** `./infra/switch/up.sh` (docker compose up of the published ghcr.io/sandbox-quantum images, 0.31.0) was refused by the Claude Code auto-mode permission checker ("Code from External"). Images are already pulled.
+- **Evidence:** tool denial on `cd infra/switch && ./up.sh`
+- **Impact:** A2 kill test can't run until the stack is up. Everything else for A1/A2 is written.
+- **Workaround / next step:** the user starts it once with `! ./infra/switch/up.sh` from the repo root (or allows it). Then `uv run python scripts/killtest/killtest.py`.
+
+## [2026-11-05 19:20 IST] platform (switch-ba) | 0.31.0 docs describe SSE + client heartbeat; source also has the WebSocket
+- **Status:** open (source-verified, not yet run)
+- **What happened:** `docs/official/internals/agent-protocol.md` at tag switch-v0.31.0 describes `GET /agents/{id}/events` (SSE) + `POST /connection/beat` every 2 s. The same tag's source also serves `WS /agents/{id}/connection/ws` (server sends `{"event":"ping"}` every interval, client answers `{"type":"pong","cursor":n}`; refusals come as a `refused` frame then close code 4000+status). Registration is `POST /agents` (raw, `connector_type:"custom"` + `integration_profile`) or `POST /agents/register-known` (known types only), both with a registration key as Bearer.
+- **Evidence:** core/switch_core/bridges/agent/api/handlers.py:1178 (connection_socket), :186 (register), :286 (register-known) at tag switch-v0.31.0
+- **Impact:** none if the WS works on the live server; the client will use WS.
+- **Workaround / next step:** kill test confirms on the live stack.
+
+## [2026-11-05 19:20 IST] platform (switch-ba) | Assumptions in the brief that the 0.31.0 source contradicts or refines
+- **Status:** open (source-verified, not yet run)
+- **What happened:**
+  1. Linking a Mattermost account to a Switch user is NOT Console-only: `POST /gateway/collaborations/{bridge_id}/identities` {external_user_id, username, user_id:null} as the signed-in user (gateway/collaborations.py:815).
+  2. Addressing rules can name humans by participant id (`users: [...]`) and agents by agent UUID (`agents: [...]`), plus symbolic `owner` / `owner_agents`. Set by owner/admin with `PUT /gateway/agents/{id}/addressing-policy` (gateway/agents.py:685). So "@acme-env custom rule agents=[triage]" is a plain API call, no browser.
+  3. Gateway users and registration keys are API-able: admin `POST /gateway/users`, then each user `POST /gateway/api-keys` (type "registration") after cookie login `POST /gateway/auth/login`.
+  4. No message edit/redact op exists in the 0.31.0 operation registry, so cards must be re-posted, not edited in place.
+  5. Adding an agent to a room: `invite_agent_to_room` op (allowed if the target's policy admits you) or `POST /gateway/rooms/{id}/agents` {agent_ids} (room write permission).
+- **Evidence:** file:line above at tag switch-v0.31.0
+- **Impact:** positive. If confirmed live, A5 setup.sh needs zero browser steps.
+- **Workaround / next step:** confirm in the kill test.
+
+## [2026-11-05 20:05 IST] sandbox (switch-7c) | A crashing repro looked like a reproduced bug
+- **Status:** fixed
+- **What happened:** A test meant to use a nonexistent image, `node:7-alpine`, but that image exists on Docker Hub, so Docker pulled it. Node 7 has no `String.prototype.padStart`, the repro threw, and the run came back as exit 1, `passed=False`. That's the same shape as the real bug, so a bisect would have named the wrong culprit.
+- **Evidence:** `tests/sandbox/test_sandbox_docker.py::test_unknown_image_raises_sandbox_error` failed with "DID NOT RAISE SandboxError".
+- **Impact:** Any env that crashes the repro (old node, broken ref) could have been reported as reproducing the bug.
+- **Workaround / next step:** `DockerSandbox.run()` now raises `SandboxError` when the repro prints no `cutoff=… payout=…` line. Agents must surface a SandboxError as "sandbox error", never as a failure. The test now uses node 99, and the node:7 image was removed.
+
+## [2026-11-05 20:05 IST] sandbox (switch-7c) | bizclock's own test suite fails in IST (intended)
+- **Status:** wontfix (by design)
+- **What happened:** `TZ=Asia/Kolkata npm test` in fixtures/bizclock: 3 pass, 6 fail. In UTC, 9/9 pass on node 20, 22 and 24. That's the point of the story: the vendor's CI is UTC. After `fixtures/bizclock-fix.patch`, 19/19 pass in UTC, Kolkata, Kathmandu, St_Johns and New_York.
+- **Evidence:** fixtures/make-fix-patch.sh output; tests/sandbox/test_sandbox_bizclock.py
+- **Impact:** @fixer in claude mode must run `npm test` under TZ=Asia/Kolkata as well as UTC to see the bug in the existing suite. Side note for the epilogue: in Asia/Kathmandu (+05:45) the buggy repro prints `cutoff=Fri 17:15 payout=Fri`. The cutoff is wrong, but the payout day is right and the repro exits 0, so a Kathmandu customer would NOT see a failing repro with the 17:10 order.
+- **Workaround / next step:** none needed for M1/M2. If the epilogue needs Kathmandu to fail, use a 17:20 order there.
+
+## [2026-11-05 19:40 IST] lead | Hop limit 12 too low for the full flow (re: agents entry on MAX_HOPS_PER_CASE)
+- **Status:** fixed
+- **What happened:** The §3 flow sends 16 tagged agent messages, but the guard was set to 12, so the case would have been cut off at verify_req.
+- **Evidence:** tests/case/test_state.py::test_full_flow_completes_under_hop_limit
+- **Impact:** None after the fix.
+- **Workaround / next step:** `config.MAX_HOPS_PER_CASE = 20`; contracts.py and docs/contracts.md updated to match.

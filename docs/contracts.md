@@ -58,7 +58,7 @@ Every agent-to-agent message is a human-readable sentence, then a **last line** 
 
 Loop guard, enforced in `woym/case/state.py`:
 - each step fires at most once per case;
-- at most 12 hops per case;
+- at most 20 hops per case (the full flow uses 16; `config.MAX_HOPS_PER_CASE`);
 - at most one targeted send per agent every 2 s;
 - agents ignore their own messages and Switch system messages;
 - the LLM only ever writes prose and never chooses recipients or steps.

@@ -202,5 +202,5 @@ class Case:
     customer_env: Env | None = None
     bisect: BisectReport | None = None
     fix: FixResult | None = None
-    hops: int = 0  # loop guard: max 12 per case
+    hops: int = 0  # loop guard: max config.MAX_HOPS_PER_CASE (20) per case
     history: list[str] = field(default_factory=list)  # steps already fired
