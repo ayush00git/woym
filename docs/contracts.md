@@ -94,3 +94,13 @@ Loop guard, enforced in `woym/case/state.py`:
 
 - Anything replayed or faked has to be labelled in the chat output: fixture fixer mode, scripted human messages in the demo, the customer laptop being a container. The README says the same.
 - No silent fallbacks. If a component falls back (for example the fixer drops from claude to fixture), it says so in chat and logs it in `ISSUES.md`.
+
+## 8. The live stack has one driver at a time
+
+The Switch stack, the room and `var/switch/credentials.json` are shared by every session, so only one driver may use them at a time.
+
+- `scripts/demo.py` writes `var/run/live.lock` (its pid) at start and removes it at exit, including on failure or a signal.
+- While the lock exists and its pid is alive, nothing may write `var/switch/credentials.json`, create or switch rooms, or re-register agents. `woym.switch.setup` refuses with a clear message. A lock whose pid is dead is stale and may be removed.
+- `--fresh-room <name>` stores the room under `rooms.<name>` and changes the active room only with `--activate`.
+- Tests never read or write the real `var/switch/credentials.json` and never connect to the live stack. They use temp creds and the fake ws server.
+- To drive the room by hand, ask the lead first.
