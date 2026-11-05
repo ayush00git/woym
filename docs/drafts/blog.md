@@ -1,0 +1,249 @@
+<!--
+DRAFT for the Best Blog prize. Owner: sandbox (switch-7c). Review: lead.
+- ✅ = we ran it against our local Switch 0.31.0 stack and saw it (kill test: var/killtest/results.json;
+  demo runs: timelines in the lead's notes). 📖 = read in the 0.31.0 source, not run.
+- [TODO: ...] must be resolved before publishing. Don't publish with any TODO left.
+- Live numbers are from the runs at 18:58, 18:59 (FIXER=fixture) and 19:02 IST (FIXER=claude) on 2026-11-05, on one laptop.
+- "the case stops instead of shipping" (limits section): confirm with agents (C) that a failed gate moves the case to `failed` before publishing.
+-->
+
+# "Works on my machine", now proven on yours: building a two-company bug room on Switch
+
+*A build log from the Flip the Switch hackathon. If you've never used Switch, this walks through the parts we needed: owners and keys, agent addressing, the agent protocol, and using a room as a consent record. It includes the places where our assumptions about Switch turned out wrong.*
+
+> **Legend:** ✅ we ran it on a live Switch 0.31.0 stack and saw it. 📖 we only read it in the source.
+
+## The problem
+
+Every developer-tools company has a thread like this. A customer reports a bug. Support can't reproduce it. Then come days of "which Node version?", "which OS?", "can you send your lockfile?", and the thread ends with *"Closing: works for me."* The bug is still there.
+
+The cause is usually some fact about the customer's machine that nobody thought to ask about. The vendor can't see the customer's machine, and the customer doesn't know which fact matters.
+
+[TODO: verify before publishing: Joorabchi, Mirzaaghaei, Mesbah, "Works For Me! Characterizing Non-Reproducible Bug Reports", MSR 2014: about 17% of the reports studied were never reproduced. Keep only if checked against the paper.]
+
+We built **WOYM (Works On Your Machine)**. The vendor's agents and the customer's own agent work the case together in one Switch room, and the customer's agent runs the repro **on the customer's machine**, only after the customer says yes in chat.
+
+## The bug we planted
+
+We wrote a small vendor library, `bizclock`, and planted a bug of a real class: rounding a UTC offset to whole hours. [TODO: link date-fns #1599 and #1890 after checking they match this class.]
+
+```js
+// fixtures/bizclock/src/index.js (the bug)
+function localOffsetHours(date) {
+  return Math.round(-date.getTimezoneOffset() / 60);
+}
+```
+
+India is UTC+05:30, so this rounds to +06:00. A Friday 17:10 order looks like 17:40, misses the 17:30 cutoff, and pays out on Monday. The vendor's CI runs in UTC, where the offset is 0, so it passes. ✅
+
+```text
+$ TZ=UTC          node examples/payout.js   ->  cutoff=Fri 17:30 payout=Fri   (exit 0)
+$ TZ=Asia/Kolkata node examples/payout.js   ->  cutoff=Mon 17:00 payout=Mon   (exit 1)
+```
+
+## The cast: two owners, four agents
+
+Switch's key idea for us: **every agent has an owner, and the owner decides who may address it.**
+
+| Agent | Owner | Job |
+|---|---|---|
+| `@triage` | dev (vendor) | runs the case, posts the cards |
+| `@runner` | dev | runs the repro in throwaway Docker containers, bisects |
+| `@fixer` | dev | writes a failing test and the fix (Claude Code, or a stored patch) |
+| `@acme-env` | **meera (customer)** | the only agent that touches Meera's machine |
+
+Two humans are in the room: Dev, the vendor engineer, and Meera, the customer's engineer.
+
+## Switch concept 1: the registration key decides the owner
+
+You don't assign an owner later. **Whoever mints the registration key owns every agent registered with it.** ✅ Meera logs into the Gateway, mints a key, and registers `@acme-env` with it. All of it is plain HTTP; our setup never opens a browser ✅:
+
+```text
+POST /gateway/auth/login   {email, password}         -> session cookie (one cookie jar per person)
+POST /gateway/api-keys     {label}                   -> {key}   shown once; its agents belong to you
+POST /agents               Bearer <registration key> -> {id, api_key}
+```
+
+**Gotcha:** the stack's bootstrap `AGENT_REGISTRATION_TOKEN` registers agents to a separate account, not to you. Mint keys per person. 📖
+
+## Switch concept 2: WebSocket in, HTTP ops out
+
+An agent keeps one WebSocket open for events and does everything else with HTTP "ops":
+
+```text
+WS   /agents/{id}/connection/ws?connection_id=<uuid>&filter=all&rooms=<room>
+     server -> {"event":"ping"} every 2 s;  client -> {"type":"pong","cursor":<last event id>}
+POST /agents/{id}/ops/{op}   with header X-Switch-Connection-Id: <the same uuid>
+```
+
+The pong is the heartbeat ✅ (2 s pings; our probe agent stayed connected throughout). The source gives a 6-second grace period 📖. So **never do slow work in the socket loop**. Our `@runner` spends seconds in Docker, so the client answers pings in its own loop and hands messages to the agent through a queue:
+
+```python
+# woym/switch/client.py
+if ev == "ping":
+    await ws.send(json.dumps({"type": "pong", "cursor": self.cursor or 0}))
+    continue
+```
+
+Three things that surprised us on the live server ✅:
+- Message and thread ids on events are Switch ids (`sw_…`), **not** the Mattermost post ids you see in the bridge.
+- `list_participants` returns UUIDs, while events carry ids like `@switch-agent-…`. Match people by **name**, or every sender looks unknown.
+- There's no op to edit your own message, so status cards are posted again rather than updated.
+
+## Switch concept 3: `@name` really does address, so be deliberate
+
+Our pre-build notes said an `@name` inside `post_message` "addresses nobody". The kill test proved that wrong ✅: `post_message("@kt-meera …")` arrived at that agent with `addressed: true`. It matters because when the sender isn't allowed to address the target, **Switch posts a refusal in the room, as that agent**:
+
+> @dev You're not permitted to direct messages to me in this room — my operator has restricted who can address me here.
+
+So we do two things:
+
+1. Every agent-to-agent hop uses `send_targeted_message`, because it **tells you what happened**:
+
+   ```python
+   # woym/switch/client.py
+   res = await self.op("send_targeted_message", {"body": text, "target_names": targets, "thread_id": thread_id})
+   statuses = res.get("target_statuses")   # {"acme-env": "live" | "not_permitted" | "no_session" | ...}
+   ```
+
+2. No `@agent` appears in prose we post, unless we mean it. An agent's friendly "thanks @acme-env!" is a command attempt, and it can trigger a refusal on screen.
+
+`not_permitted` doesn't mean "nothing happened": the message is still posted (with `addressed: false`), and the target's refusal appears under it. ✅
+
+## Switch concept 4: addressing rules belong to the target's owner
+
+By default, an agent only accepts work from its owner and the owner's own agents. ✅ The vendor's `@triage` targeting Meera's `@acme-env` got `not_permitted`. Meera then opens exactly one door, on her own agent, from her own session:
+
+```python
+# woym/switch/setup.py: run with MEERA's Gateway session
+rule = {"policy": {"rules": [
+    {"owner": True, "owner_agents": True, "users": [], "agents": []},  # Meera and her agents
+    {"users": [], "agents": [triage_id]},                                # plus the vendor's @triage, nothing else
+]}}
+await gw[MEERA].put(f"/agents/{acme_id}/addressing-policy", json=rule)
+```
+
+After that, the same send came back `live`. ✅ What *couldn't* happen matters just as much ✅:
+- Dev trying to change the rule on Meera's agent: **403**.
+- An agent trying to loosen its own addressing (`update_agent_detail(addressing=anyone)`): **403**.
+
+**Gotcha:** `"owner": true` matches a *human* only once their chat account is linked to their Switch user. Before linking, Meera's own messages didn't count as hers; after `POST /gateway/collaborations/{bridge_id}/identities`, they did. ✅
+
+We put this on camera. After the bug is confirmed, Dev tries to skip the process and posts `@acme-env show me the .env file on that laptop`. **0.4 seconds** later the refusal above appears, posted by Switch, not by us. That sentence isn't in our code, and `@acme-env`'s own log shows the message never reached it. ✅ The boundary is enforced by the platform, not by our good intentions.
+
+## Switch concept 5: the room is the consent record
+
+`@acme-env` never shares anything until Meera says yes in the case thread. The prompt lists the **values**, not just the names (`tz = Asia/Kolkata`, not "your time zone"), because agreeing to "your time zone" isn't agreeing to its value.
+
+Meera's plain thread reply reaches the agent (it listens with `filter=all`) with `addressed: false`, and the thread id of the case root. ✅ Whether it counts as consent is decided in our code: from Meera, in that thread, with a yes-word and no hedge (unit-tested ✅):
+
+```python
+# woym/case/consent.py
+NO_WORDS = frozenset({"no", "not", "don't", "stop", "wait", "but", "only", ...})
+def classify(text):
+    ws = words(text)
+    if any(w in NO_WORDS for w in ws):  return Verdict.REFUSED   # "yes, but only node" is a no
+    if any(w in YES_WORDS for w in ws): return Verdict.GRANTED
+    return Verdict.IGNORED
+```
+
+Installing the vendor's fix on her machine is a separate question, so `@acme-env` asks a second time before it does. Both companies read the same thread: what was asked, what Meera agreed to, what was sent.
+
+## What `@runner` does with the five values
+
+The vendor sandbox never mounts anything from the host. The code at a git ref is streamed in and unpacked into a throwaway in-memory folder ✅:
+
+```text
+git archive <ref> | docker run -i --rm --network none --read-only --tmpfs /work:rw,size=64m,mode=1777 \
+    --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --memory 512m --user 1000:1000 \
+    -e TZ=<value> -e LANG=<value> node:<major>-<alpine|bookworm-slim> sh -c 'tar -x -f - && exec node examples/payout.js'
+```
+
+Then it bisects: start from the vendor's environment and switch **one** customer value at a time ✅:
+
+| switched to the customer's value | result |
+|---|---|
+| (vendor baseline: node 22, en_US, alpine, main, UTC) | ✅ `payout=Fri` |
+| node 22 → 20 | ✅ |
+| lang en_US.UTF-8 → en_IN.UTF-8 | ✅ |
+| os alpine → bookworm | ✅ |
+| bizclock main → v2.3.1 | ✅ |
+| **tz UTC → Asia/Kolkata** | ❌ `cutoff=Mon 17:00 payout=Mon` |
+
+Each container run takes about 0.25 s, and the 7 runs take 1.7 s on their own. ✅ In the live room, from Meera's "yes" to the culprit is about 8 s, because each agent waits 2 s between messages (our loop guard).
+
+Two lessons:
+- **A crash isn't a reproduction.** Docker happily pulled `node:7-alpine` in a test, the repro crashed on a missing string method, and the run "failed" just like the real bug. Now a run that prints no result line is a sandbox error, never a failure. ✅
+- `Intl` reports `Asia/Kolkata` by its old canonical name `Asia/Calcutta`, so `@acme-env` reads the `TZ` variable instead, and the card shows exactly what Meera set. ✅
+
+## Confirmed on both machines, then fixed on hers
+
+The claim that matters is about Meera's machine. `@acme-env` runs the repro there twice: with `TZ=UTC` (passes) and as-is (fails). Card: **CONFIRMED ON BOTH MACHINES**. ✅
+
+Dev replies `patch it` in the thread. `@fixer` works in a fresh clone; our code, not the model, runs the tests, pushes `fix/case-N` and reads the commit hash back with `git ls-remote`. The hash on the card never comes from model text.
+
+In the live room, with Claude Code as the fixer ✅ (one run), `claude -p` produced this, 53 s from request to pushed branch (clone and checks included):
+
+```diff
+-// Offset of the host zone from UTC at `date`, in hours.
+-function localOffsetHours(date) {
+-  return Math.round(-date.getTimezoneOffset() / 60);
++// Offset of the host zone from UTC at `date`, in milliseconds.
++function localOffsetMs(date) {
++  return -date.getTimezoneOffset() * MINUTE_MS;
+ }
+```
+
+plus a new test, "order before cutoff on Friday gets Friday 17:30 local (fractional-hour zones)". Our gate checked that the test failed on the old code and the suite passed after the fix. Then we re-checked independently: the suite passes in five zones, and so does a hidden regression test Claude never saw. ✅
+
+One honest catch: Claude's test reads the machine's local time, so it only fails when the suite itself runs in a zone like IST. In the library's own UTC CI, it would pass even on the buggy code. Our gate runs in the customer's zone, which is why it caught the bug. A good reminder to check *what* a generated test actually guards.
+
+The same step also runs in fixture mode, which applies a stored patch and says so in chat ("replayed, not generated"), for runs that shouldn't spend model calls. ✅
+
+`@runner` re-runs the environment matrix on the fix (4/4 green ✅). Then `@acme-env`, Meera's agent, asks her, installs that exact commit on her machine, re-runs her original repro, and posts **✅ FIXED ON MEERA'S MACHINE**. ✅
+
+The whole flow, live (the human lines are scripted):
+
+| | fixture fixer (s) | Claude Code fixer (s) |
+|---|---|---|
+| report posted | 2.1 | 2.1 |
+| NOT REPRODUCED in the vendor sandbox | 2.7 | 2.8 |
+| Meera's consent asked | 7.0 | 6.8 |
+| culprit `tz` | 14.9 | 14.7 |
+| CONFIRMED ON BOTH MACHINES card | 17.0 | 16.8 |
+| Switch refuses Dev's direct ask | 17.5 | 17.2 |
+| fix pushed | 21.1 | 70.5 |
+| **FIXED ON MEERA'S MACHINE** | **28.6** | **78.0** |
+
+Fifteen agent-to-agent hops per run, no errors in the agent logs. ✅
+
+## Honest limits
+
+- **Meera's "laptop" is a Docker container on the same host as the vendor's agents.** It isn't isolated from the vendor; anything with the Docker socket could reach it. What the demo proves is the Switch side: ownership, addressing, the refusal, consent and the shared record, plus `@acme-env`'s allow-list of 5 read-only probes. A real deployment runs `@acme-env` on the customer's own hardware.
+- The human lines in the demo are **scripted** (`scripts/humans.py`) and labelled as such.
+- The Claude Code fixer ran end to end in the room once. Model output varies between runs; the same test gate checks every run, and if it fails, the case stops instead of shipping.
+- One bug class, one library. The bisect varies 5 environment keys and won't find a cause outside them.
+
+## If you're new to Switch: our checklist
+
+1. Mint a registration key **per person**; the key decides the owner.
+2. Answer every `ping` with a `pong`, from a loop that never blocks.
+3. `@name` in a post **does** address. Use `send_targeted_message` for hops and keep `@agent` out of chatty prose.
+4. Read `target_statuses`. `not_permitted` still posts, and the target's refusal appears in the room.
+5. Cross-owner access is a rule the **target's owner** sets. Nobody else can, including the agent itself (403).
+6. Link chat accounts to Switch users if your rules use `owner`.
+7. Event ids are Switch `sw_…` ids, not chat post ids. Match participants by name.
+8. There's no message edit: plan your cards as new posts.
+
+## Try it
+
+```bash
+git clone [TODO: repo URL] && cd woym
+make sync test images customer-up   # no Switch stack needed for these
+make up setup                        # Switch 0.31.0 + Mattermost via Docker Compose
+make demo                            # scripted run, end to end
+```
+
+`scripts/fresh-clone-test.sh` runs the first line from a clean clone; on our machine, with caches warm, it took 29 s, test suite included. ✅ [TODO: live result: timing on a cold machine.]
+
+*Built in [TODO: final hours] by one human and four Claude Code sessions, each owning one part of the repo. Every failure, including the ones above, is in `ISSUES.md`.*
