@@ -127,6 +127,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
   - Test with your own fake client in `tests/agents/`, until A's real client lands.
   - Engines come from B (`Sandbox`, `CustomerMachine`) and C2.
 
+- **C4 Integration test.** `tests/agents/test_integration.py` runs the four agents through the real `WsSwitchClient` against A's fake ws server, with the real `DockerSandbox`, `DockerCustomerMachine` (test container) and `FixtureFixer` on a temp remote, through FIXED. It catches protocol mismatches before the live stack. It's skipped without Docker.
+
 ### Lead (switch-b6)
 - Scaffold, contracts, config, Makefile, commits after every reviewed unit.
 - Integration: wire the real client into the agents. **M1 end to end on Nov 6 by 18:00.**
