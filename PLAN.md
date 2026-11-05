@@ -49,9 +49,9 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 | Who | Session | Role | Owns |
 |---|---|---|---|
 | **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
-| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `tests/switch/`, `docs/switch-notes.md` |
+| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `scripts/record.py`, `tests/switch/`, `docs/switch-notes.md` |
 | **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg`, `docs/drafts/` |
-| **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/` |
+| **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/`, `docs/switch-usage.md` |
 
 ## 4. Work packages
 
@@ -74,6 +74,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **A6 Status.** `make status` (`scripts/status.py`) is the preflight before recording. It shows stack health, each agent's connection and owner, Meera's rule on @acme-env, the room id and the latest case step.
 - **A7 Recording room.** `python -m woym.switch.setup --fresh-room <name>` creates a clean room per video take, with the same agents, rule and links, and makes it the active room.
+
+- **A8 Recorder.** `scripts/record.py` records the Mattermost room and the case thread at 1920×1080 to `media/raw/take-<n>.webm` while `scripts/demo.py` runs. It only reads, and follows the live lock.
 
 ### B: Sandbox (switch-7c)
 - **B1 bizclock** in `fixtures/bizclock/`:
@@ -136,6 +138,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **C4 Integration test.** `tests/agents/test_integration.py` runs the four agents through the real `WsSwitchClient` against A's fake ws server, with the real `DockerSandbox`, `DockerCustomerMachine` (test container) and `FixtureFixer` on a temp remote, through FIXED. It catches protocol mismatches before the live stack. It's skipped without Docker.
 
+- **C5 Switch usage map.** `docs/switch-usage.md`: each Switch feature we use, with file:function, its role in the demo, what breaks without it, and whether it's [live-verified] or [fake-tested]. Folded into the README.
+
 ### Lead (switch-b6)
 - Scaffold, contracts, config, Makefile, commits after every reviewed unit.
 - Integration: wire the real client into the agents. **M1 end to end on Nov 6 by 18:00.**
@@ -148,8 +152,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 |---|---|---|
 | Nov 5, 23:00 | A2 kill test results; B1–B3 running locally; C1 tested | **GO (reported 18:54 IST):** cross-owner addressing is Switch-enforced on live 0.31.0 |
 | Nov 6, 13:00 | A3–A5, B4–B5, C2–C3 done against the contracts | |
-| Nov 6, 18:00 | **M1**: report → NOT REPRODUCED → consent → lineup → bisect → CONFIRMED BOTH, in real Mattermost | Submittable on its own |
-| Nov 6, 23:59 | **M2**: fix → matrix → FIXED ON MEERA'S MACHINE | |
+| Nov 6, 18:00 | **M1**: report → NOT REPRODUCED → consent → lineup → bisect → CONFIRMED BOTH, in real Mattermost | **Done Nov 5, 18:55 IST**: live in 15.7 s |
+| Nov 6, 23:59 | **M2**: fix → matrix → FIXED ON MEERA'S MACHINE | **Done Nov 5, 18:59 IST** with the fixture fixer: live in 28.6 s. Claude-mode live run pending |
 | Nov 7, 10:00 | Cut M2 if it isn't solid. Fresh-clone test | |
 | Nov 7, 13:00–18:00 | Record and cut the video; README, blog, #HowISwitch | |
 | Nov 7, 21:00 | The user submits | Hard deadline 23:59 |
