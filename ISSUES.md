@@ -137,3 +137,14 @@ EOF
 - **Evidence:** `date` returned 18:28 IST at `git init` and 18:49 IST when this entry was written. Commit times in `git log --format='%h %ad'` are the real ones.
 - **Impact:** Only the order of the log. No technical impact.
 - **Workaround / next step:** From now on every entry uses `$(date '+%Y-%m-%d %H:%M IST')`. All sessions have been told.
+
+## [2026-11-05 18:52 IST] sandbox (switch-7c) | Bugs fixed while building B8/B9 (own unreleased code)
+- **Status:** fixed
+- **What happened:**
+  1. fresh-clone-test.sh first checked only probe's exit code, so wrong facts would still pass. It now compares the exact probe JSON and greps the IST/UTC repro lines; a mismatch exits 1 (checked).
+  2. media/cold-open.html: the final caption overlapped the "closed as not reproducible" line. The caption is now a full-screen overlay over the dimmed thread.
+  3. media/cold-open.html: in windows that weren't 1920x1080, the stage scaled around the wrong origin and was cut off (seen at 1280x720). It now uses top-left anchoring plus a centering translate; checked at 1920x1080, 1280x720 and 1000x900.
+  4. media/cold-open.html: the "mock-up" label was dimmed under the caption overlay; it now sits above it.
+- **Evidence:** headless Chrome screenshots (`google-chrome --headless=new --window-size=W,H --screenshot`).
+- **Impact:** none remaining.
+- **Workaround / next step:** Caveat: headless Chrome's virtual time doesn't advance CSS transitions, so I could only check the static final frame and the first 3.5 s by screenshot. Watch the full animated run once in a real browser before recording.

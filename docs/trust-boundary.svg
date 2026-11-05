@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-labelledby="t d" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <title id="t">WOYM trust boundary</title>
+  <desc id="d">Vendor side (owner dev) and customer side (owner meera) meet only in one Switch room. Crossing the room: five consented environment values and repro results from the customer, and the fix commit sha from the vendor. Never crossing: shell access, other environment variables or files, and the customer's own code.</desc>
+  <style>
+    :root { --bg:#ffffff; --fg:#1b1f24; --muted:#57606a; --panel:#f6f8fa; --line:#d0d7de;
+            --vendor:#0969da; --room:#8250df; --cust:#1a7f37; --no:#cf222e; --chip:#ffffff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --panel:#161b22; --line:#3d444d;
+              --vendor:#4493f8; --room:#ab7df8; --cust:#3fb950; --no:#f85149; --chip:#0d1117; }
+    }
+    .bg { fill: var(--bg); }
+    .panel { fill: var(--panel); stroke-width: 2; }
+    .h { font-size: 20px; font-weight: 700; fill: var(--fg); }
+    .sub { font-size: 13px; fill: var(--muted); }
+    .t { font-size: 15px; fill: var(--fg); }
+    .tb { font-size: 15px; font-weight: 700; fill: var(--fg); }
+    .s { font-size: 12.5px; fill: var(--muted); }
+    .chip { fill: var(--chip); stroke: var(--line); stroke-width: 1.5; }
+    .title { font-size: 26px; font-weight: 800; fill: var(--fg); }
+    .lbl { font-size: 14px; font-weight: 700; }
+    .no { stroke: var(--no); fill: none; stroke-width: 2.5; stroke-dasharray: 7 6; }
+  </style>
+  <defs>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--cust)"/></marker>
+    <marker id="av" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--vendor)"/></marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="30" y="46">Trust boundary: what crosses, and what never does</text>
+
+  <!-- Vendor -->
+  <rect class="panel" x="30" y="76" width="340" height="452" rx="14" style="stroke:var(--vendor)"/>
+  <text class="h" x="50" y="108">Vendor side</text>
+  <text class="sub" x="50" y="128">Switch owner: dev</text>
+  <rect class="chip" x="50" y="146" width="300" height="62" rx="10"/>
+  <text class="tb" x="66" y="172">@triage</text><text class="s" x="66" y="193">case state machine, posts the cards</text>
+  <rect class="chip" x="50" y="222" width="300" height="62" rx="10"/>
+  <text class="tb" x="66" y="248">@runner</text><text class="s" x="66" y="269">throwaway Docker sandbox, no network</text>
+  <rect class="chip" x="50" y="298" width="300" height="62" rx="10"/>
+  <text class="tb" x="66" y="324">@fixer</text><text class="s" x="66" y="345">Claude Code: failing test + fix</text>
+  <rect class="chip" x="50" y="374" width="300" height="62" rx="10"/>
+  <text class="tb" x="66" y="400">bizclock repo</text><text class="s" x="66" y="421">pushes fix/case-n; sha via git ls-remote</text>
+  <text class="s" x="50" y="470">Runs the customer's repro on the vendor's</text>
+  <text class="s" x="50" y="488">machines, with customer values only after</text>
+  <text class="s" x="50" y="506">they were shared in the room.</text>
+
+  <!-- Switch room -->
+  <rect class="panel" x="430" y="76" width="340" height="452" rx="14" style="stroke:var(--room)"/>
+  <text class="h" x="450" y="108">Switch room</text>
+  <text class="sub" x="450" y="128">#acme-support · one thread per case</text>
+
+  <!-- Customer -->
+  <rect class="panel" x="830" y="76" width="340" height="452" rx="14" style="stroke:var(--cust)"/>
+  <text class="h" x="850" y="108">Customer side</text>
+  <text class="sub" x="850" y="128">Switch owner: meera</text>
+  <rect class="chip" x="850" y="146" width="300" height="62" rx="10"/>
+  <text class="tb" x="866" y="172">@acme-env</text><text class="s" x="866" y="193">5 allow-listed, read-only probes</text>
+  <rect class="chip" x="850" y="222" width="300" height="62" rx="10"/>
+  <text class="tb" x="866" y="248">Meera</text><text class="s" x="866" y="269">says yes in chat before anything is shared</text>
+  <rect class="chip" x="850" y="298" width="300" height="62" rx="10"/>
+  <text class="tb" x="866" y="324">acme-laptop</text><text class="s" x="866" y="345">node 20 · TZ=Asia/Kolkata · acme-payouts</text>
+  <text class="s" x="850" y="400">Meera's rule: only @triage may address</text>
+  <text class="s" x="850" y="418">@acme-env. It runs the repro on her</text>
+  <text class="s" x="850" y="436">machine and confirms the fix there.</text>
+
+  <!-- Crossing flows (through the room) -->
+  <text class="lbl" x="450" y="170" style="fill:var(--cust)">5 consented values</text>
+  <text class="s" x="450" y="188">node · lang · os · bizclock · tz</text>
+  <line x1="828" y1="202" x2="372" y2="202" style="stroke:var(--cust)" stroke-width="3" marker-end="url(#ac)"/>
+
+  <text class="lbl" x="450" y="250" style="fill:var(--cust)">Repro results</text>
+  <text class="s" x="450" y="268">pass/fail + "cutoff=… payout=…" line</text>
+  <line x1="828" y1="282" x2="372" y2="282" style="stroke:var(--cust)" stroke-width="3" marker-end="url(#ac)"/>
+
+  <text class="lbl" x="450" y="330" style="fill:var(--vendor)">Fix commit sha</text>
+  <text class="s" x="450" y="348">read with git ls-remote, never LLM text</text>
+  <line x1="372" y1="362" x2="828" y2="362" style="stroke:var(--vendor)" stroke-width="3" marker-end="url(#av)"/>
+
+  <text class="s" x="450" y="410">Every hop is a targeted message between</text>
+  <text class="s" x="450" y="428">agents. The thread is the consent record</text>
+  <text class="s" x="450" y="446">and the audit trail, readable by both</text>
+  <text class="s" x="450" y="464">companies.</text>
+
+  <!-- Never crosses -->
+  <text class="h" x="30" y="580" style="fill:var(--no)">Never crosses</text>
+  <g>
+    <path class="no" d="M60 620 H330"/><path d="M335 608 l18 18 m0 -18 l-18 18" style="stroke:var(--no)" stroke-width="3"/>
+    <text class="t" x="60" y="652">Shell access to Meera's machine</text>
+    <text class="s" x="60" y="672">the vendor never runs commands there</text>
+  </g>
+  <g>
+    <path class="no" d="M450 620 H720"/><path d="M725 608 l18 18 m0 -18 l-18 18" style="stroke:var(--no)" stroke-width="3"/>
+    <text class="t" x="450" y="652">Other env values or files</text>
+    <text class="s" x="450" y="672">only the 5 keys exist in the allow-list</text>
+  </g>
+  <g>
+    <path class="no" d="M840 620 H1110"/><path d="M1115 608 l18 18 m0 -18 l-18 18" style="stroke:var(--no)" stroke-width="3"/>
+    <text class="t" x="840" y="652">Acme's own code</text>
+    <text class="s" x="840" y="672">acme-payouts stays on the laptop</text>
+  </g>
+
+  <text class="s" x="30" y="728">Demo note: acme-laptop is a container on the same host, not a second computer. The boundary shown is enforced by</text>
+  <text class="s" x="30" y="746">Switch ownership and addressing plus @acme-env's allow-list, not by hardware.</text>
+</svg>

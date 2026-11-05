@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cold open (mock-up)</title>
+<!--
+  WOYM video cold open: a MOCK issue thread, not a real one. Generic tracker
+  styling, fictional people. Open in a browser and record at 1920x1080 (the
+  stage scales to fit any window, so full-screen works too).
+    cold-open.html          plays the sequence (about 12 s)
+    cold-open.html?static   shows the final frame
+  Keys: r replays, s jumps to the final frame.
+-->
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d; --fg: #e6edf3; --muted: #8b949e;
+    --open: #3fb950; --closed: #ab7df8; --vendor: #4493f8; --cust: #d29922; --warn: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--fg); }
+  #stage { width: 1920px; height: 1080px; background: var(--bg); position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; }
+
+  .mock { position: absolute; z-index: 2; top: 28px; right: 36px; font-size: 20px; letter-spacing: .08em; text-transform: uppercase;
+          color: var(--muted); border: 1.5px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+
+  header { padding: 64px 160px 26px; border-bottom: 1px solid var(--line); }
+  .repo { color: var(--muted); font-size: 24px; margin-bottom: 14px; }
+  .repo b { color: var(--fg); font-weight: 600; }
+  h1 { margin: 0; font-size: 46px; font-weight: 600; line-height: 1.2; }
+  h1 .num { color: var(--muted); font-weight: 400; }
+  .meta { margin-top: 18px; display: flex; gap: 16px; align-items: center; font-size: 22px; color: var(--muted); }
+  .state { display: inline-flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; font-size: 22px;
+           padding: 7px 18px; border-radius: 999px; background: var(--open); transition: background .4s; }
+  .state.closed { background: var(--closed); }
+
+  main { padding: 26px 160px 0; display: flex; flex-direction: column; gap: 16px; }
+  .c { display: grid; grid-template-columns: 52px 1fr; gap: 18px; opacity: 0; transform: translateY(14px);
+       transition: opacity .45s, transform .45s; }
+  .c.on { opacity: 1; transform: none; }
+  .av { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 22px; color: #0d1117; }
+  .av.m { background: var(--cust); } .av.v { background: var(--vendor); }
+  .box { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  .bh { padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 20px; color: var(--muted); display: flex; gap: 12px; }
+  .bh b { color: var(--fg); }
+  .day { margin-left: auto; font-weight: 700; color: var(--fg); }
+  .tag { border: 1px solid var(--line); border-radius: 999px; padding: 0 10px; font-size: 16px; }
+  .bb { padding: 12px 18px 14px; font-size: 24px; line-height: 1.4; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .9em; background: #262c36; padding: 1px 7px; border-radius: 5px; }
+  .hidden { text-align: center; color: var(--muted); font-size: 20px; border: 1px dashed var(--line); border-radius: 10px; padding: 9px; margin-left: 70px; }
+  .event { margin-left: 70px; font-size: 22px; color: var(--muted); }
+  .event b { color: var(--closed); }
+
+  .caption { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+             background: rgba(13,17,23,.84); opacity: 0; transition: opacity 1s; }
+  .caption.on { opacity: 1; }
+  .caption .big { font-size: 88px; font-weight: 800; letter-spacing: -.015em; line-height: 1.15; }
+  .static * { transition: none !important; }
+  .caption .big em { font-style: normal; color: var(--warn); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="mock">Mock-up · not a real issue</div>
+
+  <header>
+    <div class="repo">bizclock / <b>issues</b></div>
+    <h1>Friday orders before the 17:30 cutoff pay out on Monday <span class="num">#212</span></h1>
+    <div class="meta">
+      <span class="state" id="state">● Open</span>
+      <span><b style="color:var(--fg)">meera-acme</b> opened this issue · 14 comments</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="c" data-t="0.4">
+      <div class="av m">M</div>
+      <div class="box"><div class="bh"><b>meera-acme</b> commented <span class="day">Day 1</span></div>
+        <div class="bb">A 17:10 Friday order settles Monday. <code>node examples/payout.js</code> → <code>cutoff=Mon 17:00 payout=Mon</code></div></div>
+    </div>
+    <div class="c" data-t="1.6">
+      <div class="av v">S</div>
+      <div class="box"><div class="bh"><b>sam-bizclock</b> <span class="tag">Maintainer</span> commented <span class="day">Day 1</span></div>
+        <div class="bb">Can't repro. CI is green and the example prints <code>payout=Fri</code> here.</div></div>
+    </div>
+    <div class="c" data-t="2.9">
+      <div class="av v">S</div>
+      <div class="box"><div class="bh"><b>sam-bizclock</b> <span class="tag">Maintainer</span> commented <span class="day">Day 4</span></div>
+        <div class="bb">Which node version? OS? Can you paste your lockfile?</div></div>
+    </div>
+    <div class="hidden c" data-t="4.0" style="display:block">⋯ 8 hidden comments: versions, lockfiles, "try a clean install"</div>
+    <div class="c" data-t="5.1">
+      <div class="av m">M</div>
+      <div class="box"><div class="bh"><b>meera-acme</b> commented <span class="day">Day 9</span></div>
+        <div class="bb">Upgraded to main, clean install. Still broken for us. Payouts slip every Friday.</div></div>
+    </div>
+    <div class="c" data-t="6.6">
+      <div class="av v">S</div>
+      <div class="box"><div class="bh"><b>sam-bizclock</b> <span class="tag">Maintainer</span> commented <span class="day">Day 11</span></div>
+        <div class="bb">Closing: works for me. Please reopen with a minimal reproduction.</div></div>
+    </div>
+    <div class="event c" data-t="7.6" style="display:block"><b>●</b> sam-bizclock closed this as <b>not reproducible</b> · Day 11</div>
+  </main>
+
+  <div class="caption" id="caption"><div class="big">11 days. 14 comments.<br><em>Bug still there.</em></div></div>
+</div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const fit = () => {
+    const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.transform = `translate(${(innerWidth - 1920 * k) / 2}px, ${(innerHeight - 1080 * k) / 2}px) scale(${k})`;
+  };
+  addEventListener('resize', fit); fit();
+
+  const items = [...document.querySelectorAll('[data-t]')];
+  const state = document.getElementById('state');
+  const caption = document.getElementById('caption');
+  let timers = [];
+
+  function finalFrame() {
+    timers.forEach(clearTimeout); timers = [];
+    items.forEach(el => el.classList.add('on'));
+    state.classList.add('closed'); state.textContent = '✓ Closed';
+    caption.classList.add('on');
+  }
+  function play() {
+    timers.forEach(clearTimeout); timers = [];
+    items.forEach(el => el.classList.remove('on'));
+    state.classList.remove('closed'); state.textContent = '● Open';
+    caption.classList.remove('on');
+    items.forEach(el => timers.push(setTimeout(() => el.classList.add('on'), +el.dataset.t * 1000)));
+    timers.push(setTimeout(() => { state.classList.add('closed'); state.textContent = '✓ Closed'; }, 7600));
+    timers.push(setTimeout(() => caption.classList.add('on'), 9000));
+  }
+  addEventListener('keydown', e => { if (e.key === 'r') play(); if (e.key === 's') finalFrame(); });
+  if (new URLSearchParams(location.search).has('static')) { stage.classList.add('static'); finalFrame(); } else play();
+</script>
+</body>
+</html>
