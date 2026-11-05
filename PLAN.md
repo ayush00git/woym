@@ -48,9 +48,9 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 | Who | Session | Role | Owns |
 |---|---|---|---|
-| **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, demo script, README, video | shared files above, `scripts/demo.py`, `docs/` except `docs/switch-notes.md` |
+| **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
 | **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `tests/switch/`, `docs/switch-notes.md` |
-| **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/` |
+| **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg` |
 | **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/` |
 
 ## 4. Work packages
@@ -92,6 +92,23 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
   - `woym/sandbox/customer.py` `DockerCustomerMachine` implements `CustomerMachine` through `docker exec`: allow-listed probes only, `run_repro(overrides)`, and `install(sha)` via `git archive`.
   - `make customer-up` target notes go to the lead.
 - **B5** `scripts/pull-images.sh` pre-pulls every image so the demo has no download waits.
+- **B6 Reset.** `scripts/reset.sh` (`make reset`) returns everything to the pre-demo state in seconds:
+  - the customer laptop back on v2.3.1;
+  - `fix/*` branches deleted from the bare remote;
+  - `var/cases.json` and `var/work/` cleared;
+  - agent processes stopped.
+  - It's idempotent.
+- **B7 Demo orchestrator** (moved from the lead). `scripts/demo.py` (`make demo`):
+  - starts the four agents with logs in `var/logs/`;
+  - posts the scripted human lines with `scripts/humans.py` at the right moments, waiting on the case step in `var/cases.json`;
+  - per-step timeouts, a printed timeline, and a non-zero exit on failure;
+  - `--until confirmed` for M1, the full flow by default.
+  - Scripted human lines are labelled as scripted.
+  - Coordinate the agent CLI with C and `humans.py` with A.
+- **B8 Fresh-clone test.** `scripts/fresh-clone-test.sh` clones the repo to a temp dir and runs the judge path, timing each step: `make sync test images customer-up`, then `up setup demo` once the stack is approved.
+- **B9 Video assets:**
+  - `media/cold-open.html`: a mock issue thread, Day 1 "can't repro" through Day 11 "Closed: works for me". It carries a visible "mock-up" label and is screen-recordable at 1920×1080.
+  - `docs/trust-boundary.svg`: vendor side, customer side, the Switch room. It shows what crosses (the 5 consented values, results, the fix sha) and what never crosses (shell access, other env values). It needs to read in light and dark.
 
 ### C: Agents (switch-90)
 - **C1 Case core** in `woym/case/`:
