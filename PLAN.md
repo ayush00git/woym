@@ -51,7 +51,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 | **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
 | **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `scripts/record.py`, `scripts/video/`, `tests/switch/`, `docs/switch-notes.md` |
 | **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg`, `docs/drafts/` |
-| **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/`, `docs/switch-usage.md` |
+| **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/`, `docs/switch-usage.md`, `docs/drafts/blog.md` (from 19:50 Nov 5) |
 
 ## 4. Work packages
 
@@ -149,6 +149,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **C9 Known-culprits epilogue.** Done: flag-gated, with evidence re-read from room history and checked for Switch attribution.
 - **C10** Known-path consent wording; `MultiRoomClient` (two connections in one process, verified live by A) for WOYM_KNOWN=1 only.
+
+- **C14 Blog fixes** (blog.md moved from sandbox to agents): apply the C13 findings. That means ≥3 live Claude runs and the stricter gate, the hop count, the epilogue section, consent-by-id timing, real snippets and sourced numbers.
 
 ### Lead (switch-b6)
 - Scaffold, contracts, config, Makefile, commits after every reviewed unit.
