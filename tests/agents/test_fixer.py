@@ -75,7 +75,13 @@ def test_claude_fixer_with_fake_runner(bare, work):
     assert env_vars == {"TZ": "Asia/Kolkata"}
     assert cwd == work / "case-8"
     assert "TZ=Asia/Kolkata" in prompt and "TZ=UTC" in prompt and "payout=Mon" in prompt
+    assert "process.env.TZ = 'Asia/Kolkata'" in prompt and "ANY host timezone" in prompt
     assert any("ls-remote" in line for line in f.last_log)
+    log = "\n".join(f.last_log)
+    assert "claude -p took 0.1s" in log
+    assert "new test failed on the old code (TZ=Asia/Kolkata and TZ=UTC)" in log
+    assert set(f.timings) == {"clone", "edit", "gate", "push"}
+    assert "timings: clone" in f.last_log[-1]
 
 
 def test_rerun_same_case_replaces_clone_and_branch(bare, work):
@@ -99,6 +105,17 @@ def _weak_test(cwd):
     apply_patch(cwd)
     (cwd / "test" / "cutoff-tz.test.js").write_text(
         "const test = require('node:test');\ntest('always passes', () => {});\n")
+
+
+def _host_tz_test(cwd):
+    """Like Claude's first live test: relies on the HOST timezone, so it passes
+    on the buggy code in the vendor's UTC CI."""
+    apply_patch(cwd)
+    (cwd / "test" / "cutoff-tz.test.js").write_text(
+        "const test = require('node:test');\nconst assert = require('node:assert/strict');\n"
+        "const { nextCutoff } = require('..');\n"
+        "test('Friday 17:10 is before the cutoff', () => {\n"
+        "  assert.deepEqual(nextCutoff(new Date(2026, 10, 6, 17, 10)), new Date(2026, 10, 6, 17, 30));\n});\n")
 
 
 def _broken(cwd):
@@ -125,6 +142,7 @@ def _nothing(cwd):
     (_src_fix_only, "no regression test"),
     (_touch_repro, "outside src/ and test/"),
     (_weak_test, "doesn't catch the bug"),
+    (_host_tz_test, "wouldn't guard CI"),
     (_broken, "tests fail after the edit"),
     (_delete_test, "deleted tests"),
     (_commits, "HEAD moved"),

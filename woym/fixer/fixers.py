@@ -8,9 +8,11 @@ with ls-remote. The model's reply is used only as the one-line summary.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -19,6 +21,8 @@ from woym import config
 from woym.contracts import FixResult, RunResult
 from woym.fixer import workspace as ws_mod
 from woym.fixer.workspace import FixerError, Workspace
+
+log = logging.getLogger("woym.fixer")
 
 CLAUDE_TOOLS = "Read,Edit,Write,Glob,Grep,Bash(node *),Bash(npm test*)"
 CLAUDE_TIMEOUT_S = 300
@@ -31,7 +35,9 @@ Symptom: `node examples/payout.js` prints `{actual}` but should print `{expected
 It passes when {var}={vendor_value}. A bisect isolated the cause to the `{key}` setting.
 
 Do exactly this:
-1. Add a regression test under test/ (node:test) that fails with the current code when {var}={value}.
+1. Add a regression test under test/ (node:test) that fails with the current code in ANY host timezone:
+   the test must set process.env.{var} = '{value}' itself (restore it afterwards), so it also fails in the
+   vendor's CI, which runs with {var}={vendor_value}.
 2. Make the smallest fix in src/ so the whole suite passes under both {var}={value} and {var}={vendor_value}.
 Your shell already has {var}={value}. Run tests with `npm test` or `node --test`.
 
@@ -93,10 +99,20 @@ class _Base:
         self.remote = Path(remote or config.REMOTE)
         self.work_root = Path(work_root or config.WORK)
         self.base = base
+        self.timings: dict[str, float] = {}
         self.last_log: list[str] = []  # human-readable trace of the last fix(), for chat/ISSUES
 
     def _log(self, msg: str) -> None:
         self.last_log.append(msg)
+        log.info("%s fixer: %s", self.mode, msg)
+
+    @contextmanager
+    def _timed(self, phase: str):
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            self.timings[phase] = time.monotonic() - t0
 
     def _edit(self, ws: Workspace, culprit: str, failing: RunResult, env_vars: dict[str, str]) -> str:
         """Make the edit in the clone; return a one-line summary."""
@@ -104,18 +120,27 @@ class _Base:
 
     def fix(self, case_id: int, culprit: str, failing: RunResult) -> FixResult:
         self.last_log = []
+        self.timings = {}
         value = getattr(failing.env, culprit, None)
         if value is None:
             raise FixerError(f"unknown culprit {culprit!r}")
-        bad_env, _ = ws_mod.culprit_env(culprit, value)
-        ws = ws_mod.prepare(case_id, self.remote, self.work_root, self.base)
-        self._log(f"cloned {self.base} @ {ws.base_sha[:10]} into {ws.path}")
-        summary = self._edit(ws, culprit, failing, bad_env)
-        verified = ws_mod.verify(ws, culprit, value)
-        self._log(f"verified: tests pass under {culprit}={value} and vendor value; new test fails on old code")
+        bad_env, good_env = ws_mod.culprit_env(culprit, value)
+        with self._timed("clone"):
+            ws = ws_mod.prepare(case_id, self.remote, self.work_root, self.base)
+        self._log(f"cloned {self.base} @ {ws.base_sha[:10]} into {ws.path} in {self.timings['clone']:.1f}s")
+        with self._timed("edit"):
+            summary = self._edit(ws, culprit, failing, bad_env)
+        with self._timed("gate"):
+            verified = ws_mod.verify(ws, culprit, value)
+        (bv, bx), = bad_env.items()
+        gx = good_env[bv]
+        self._log(f"gate passed in {self.timings['gate']:.1f}s: new test failed on the old code ({bv}={bx} and {bv}={gx}); "
+                  f"suite passed after the fix ({bv}={bx} and {bv}={gx})")
         msg = f"fix: {culprit}={value} regression (case {case_id})\n\n{summary}\n\nWOYM fixer mode: {self.mode}"
-        sha = ws_mod.commit_and_push(ws, msg)
-        self._log(f"pushed {ws.branch} @ {sha[:10]} (sha from ls-remote)")
+        with self._timed("push"):
+            sha = ws_mod.commit_and_push(ws, msg)
+        self._log(f"pushed {ws.branch} @ {sha[:10]} in {self.timings['push']:.1f}s (sha from ls-remote)")
+        self._log("timings: " + ", ".join(f"{k} {v:.1f}s" for k, v in self.timings.items()))
         return FixResult(
             branch=ws.branch, sha=sha, files_changed=verified.src + verified.tests,
             test_name=verified.test_name, mode=self.mode, summary=summary,
@@ -141,7 +166,7 @@ class ClaudeFixer(_Base):
         out = self.runner(self.prompt(culprit, failing, env_vars), ws.path, env_vars)
         self.last_output = out
         cost = f", ${out.cost_usd:.2f}" if out.cost_usd is not None else ""
-        self._log(f"claude -p finished in {out.duration_s:.0f}s{cost}, {out.denials} tool denials")
+        self._log(f"claude -p took {out.duration_s:.1f}s{cost}, {out.denials} tool denials")
         if not out.ok:
             raise FixerError(f"claude -p failed: {out.raw[-500:] or out.text[:500]}")
         return _one_line(out.text) or "Claude Code edited src/ and test/."

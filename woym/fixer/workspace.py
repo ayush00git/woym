@@ -163,7 +163,7 @@ def prove_regression(ws: Workspace, src: list[str], tests: list[str], env_vars: 
             else:
                 p.write_bytes(data)
     if ok:
-        raise FixerError(f"the new test passes on the unfixed code, so it doesn't catch the bug:\n{out}")
+        raise FixerError(f"the new test passes on the unfixed code with {env_vars}, so it doesn't catch the bug:\n{out}")
 
 
 def test_names(ws: Workspace, tests: list[str]) -> list[str]:
@@ -206,6 +206,16 @@ def verify(ws: Workspace, culprit: str, customer_value: str) -> Verified:
         ok, out = run_tests(ws, env)
         if not ok:
             raise FixerError(f"tests fail after the edit with {env}:\n{out}")
+    # The test must catch the bug on the original code under the culprit value AND
+    # under the vendor's own CI value, so it guards the vendor's CI, not just this host.
     prove_regression(ws, src, tests, bad_env)
+    try:
+        prove_regression(ws, src, tests, good_env)
+    except FixerError as e:
+        raise FixerError(
+            f"the new test only fails when the host has {bad_env}; under {good_env} (the vendor's CI) it passes "
+            "on the unfixed code, so it wouldn't guard CI. The test must set the value itself "
+            f"(e.g. process.env.{next(iter(bad_env))} = '{next(iter(bad_env.values()))}')."
+        ) from e
     names = test_names(ws, tests)
     return Verified(src, tests, names[0] if names else tests[0])
