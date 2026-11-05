@@ -1,0 +1,22 @@
+# secrets and local config
+.env
+*.key
+
+# planning scratch (idea debate, kept local)
+.hack/
+
+# runtime state: bare remotes, work clones, case db, logs
+var/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# node
+node_modules/
+
+# video and media working files
+media/raw/
