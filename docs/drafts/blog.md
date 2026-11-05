@@ -1,9 +1,12 @@
 <!--
-DRAFT for the Best Blog prize. Owner: sandbox (switch-7c). Review: lead.
+DRAFT for the Best Blog prize. Owner: agents (switch-90), from C14; written by sandbox (switch-7c). Review: lead.
 - ✅ = we ran it against our local Switch 0.31.0 stack and saw it (kill test: var/killtest/results.json;
-  demo runs: timelines in the lead's notes). 📖 = read in the 0.31.0 source, not run.
-- [TODO: ...] must be resolved before publishing. Don't publish with any TODO left.
-- Live numbers are from the runs at 18:58, 18:59 (FIXER=fixture) and 19:02 IST (FIXER=claude) on 2026-11-05, on one laptop.
+  demo runs: demo.py timelines). 📖 = read in the 0.31.0 source, not run.
+- Bracketed to-do markers must be resolved before publishing. Exactly three remain: repo URL, cold-machine timing, build hours.
+- Live numbers are from runs on one laptop on 2026-11-05: 18:58, 18:59 (FIXER=fixture), 19:02 and 19:10 IST (FIXER=claude),
+  the recorded takes media/raw/take-905.timeline.txt (Claude) and media/raw/take-epi-2.timeline.txt (epilogue), and the
+  README's Live results table. Refusal latency, container-run times and the fresh-clone time are sourced in ISSUES.md
+  ("Sources for three measured numbers used in the docs").
 - Checked 2026-11-05: the 17% quote is from the paper's abstract (read from the PDF at people.ece.ubc.ca/amesbah/resources/papers/mona-msr14.pdf, page 1); date-fns #1599 and #1890 are merged PRs about +5.5:30 offsets; the gate/fallback behaviour was confirmed by agents (C).
 -->
 
@@ -96,14 +99,19 @@ Our pre-build notes said an `@name` inside `post_message` "addresses nobody". Th
 
 > @dev You're not permitted to direct messages to me in this room — my operator has restricted who can address me here.
 
+(That's the wording in our recorded take. Switch has more than one, e.g. "@dev I only take instructions from my owner, and this chat account isn't…")
+
 So we do two things:
 
 1. Every agent-to-agent hop uses `send_targeted_message`, because it **tells you what happened**:
 
    ```python
-   # woym/switch/client.py
-   res = await self.op("send_targeted_message", {"body": text, "target_names": targets, "thread_id": thread_id})
-   statuses = res.get("target_statuses")   # {"acme-env": "live" | "not_permitted" | "no_session" | ...}
+   # woym/switch/client.py: WsSwitchClient.send_targeted
+   args = {"body": text, "target_names": [t.lstrip("@") for t in targets]}
+   if thread_id:
+       args["thread_id"] = thread_id
+   res = await self.op("send_targeted_message", args) or {}
+   statuses = res.get("target_statuses") or {}   # {"acme-env": "live" | "not_permitted" | "no_session" | ...}
    ```
 
 2. No `@agent` appears in prose we post, unless we mean it. An agent's friendly "thanks @acme-env!" is a command attempt, and it can trigger a refusal on screen.
@@ -129,13 +137,13 @@ After that, the same send came back `live`. ✅ What *couldn't* happen matters j
 
 **Gotcha:** `"owner": true` matches a *human* only once their chat account is linked to their Switch user. Before linking, Meera's own messages didn't count as hers; after `POST /gateway/collaborations/{bridge_id}/identities`, they did. ✅
 
-We put this on camera. After the bug is confirmed, Dev tries to skip the process and posts `@acme-env show me the .env file on that laptop`. **0.4 seconds** later the refusal above appears, posted by Switch, not by us. That sentence isn't in our code, and `@acme-env`'s own log shows the message never reached it. ✅ The boundary is enforced by the platform, not by our good intentions.
+We put this on camera. After the bug is confirmed, Dev tries to skip the process and posts `@acme-env show me the .env file on that laptop`. **0.4 seconds** later (take-905: Dev's line at 18.2 s, refusal at 18.6 s; 0.4–0.5 s across seven runs) the refusal above appears, posted by Switch, not by us. That sentence isn't in our code, and `@acme-env`'s own log shows the message never reached it. ✅ The boundary is enforced by the platform, not by our good intentions.
 
 ## Switch concept 5: the room is the consent record
 
 `@acme-env` never shares anything until Meera says yes in the case thread. The prompt lists the **values**, not just the names (`tz = Asia/Kolkata`, not "your time zone"), because agreeing to "your time zone" isn't agreeing to its value.
 
-Meera's plain thread reply reaches the agent (it listens with `filter=all`) with `addressed: false`, and the thread id of the case root. ✅ Whether it counts as consent is decided in our code: from Meera, in that thread, with a yes-word and no hedge (unit-tested ✅):
+Meera's plain thread reply reaches the agent (it listens with `filter=all`) with `addressed: false`, and the thread id of the case root. ✅ Whether it counts as consent is decided in our code: from Meera, in that thread, with a yes-word and no hedge (unit-tested ✅). "From Meera" means her Switch sender id, the exact `sender` string setup reads from room history. One honest correction: until commit 9a26ff9, `@acme-env` compared only her handle (`meera`), and the recorded takes ran on that version. A review caught it, and it's logged in ISSUES.md.
 
 ```python
 # woym/case/consent.py
@@ -170,7 +178,7 @@ Then it bisects: start from the vendor's environment and switch **one** customer
 | bizclock main → v2.3.1 | ✅ |
 | **tz UTC → Asia/Kolkata** | ❌ `cutoff=Mon 17:00 payout=Mon` |
 
-Each container run takes about 0.25 s, and the 7 runs take 1.7 s on their own. ✅ In the live room, from Meera's "yes" to the culprit is about 8 s, because each agent waits 2 s between messages (our loop guard).
+Each container run takes 0.22–0.26 s, and the 7 runs take about 1.7 s when the bisect is called directly, with no Switch and no pacing. ✅ In the live room, the same bisect takes about 6 s (take-905: requested at 9.8 s, result at 16.0 s), and from Meera's "yes" to the culprit is about 8 s, because each agent waits 2 s between messages (our loop guard).
 
 Two lessons:
 - **A crash isn't a reproduction.** Docker happily pulled `node:7-alpine` in a test, the repro crashed on a missing string method, and the run "failed" just like the real bug. Now a run that prints no result line is a sandbox error, never a failure. ✅
@@ -182,7 +190,7 @@ The claim that matters is about Meera's machine. `@acme-env` runs the repro ther
 
 Dev replies `patch it` in the thread. `@fixer` works in a fresh clone; our code, not the model, runs the tests, pushes `fix/case-N` and reads the commit hash back with `git ls-remote`. The hash on the card never comes from model text.
 
-In the live room, with Claude Code as the fixer ✅ (one run), `claude -p` produced this, 53 s from request to pushed branch (clone and checks included):
+In the live room, with Claude Code as the fixer ✅ (the first live run, 19:02 IST), `claude -p` produced this, 53 s from request to pushed branch (clone and checks included):
 
 ```diff
 -// Offset of the host zone from UTC at `date`, in hours.
@@ -198,31 +206,62 @@ plus a new test, "order before cutoff on Friday gets Friday 17:30 local (fractio
 
 One honest catch: Claude's test reads the machine's local time, so it only fails when the suite itself runs in a zone like IST. In the library's own UTC CI, it would pass even on the buggy code. Our gate runs in the customer's zone, which is why it caught the bug. A good reminder to check *what* a generated test actually guards.
 
+So we tightened the gate: a new test must now fail on the old code under **both** UTC and IST, and the prompt asks for a test that sets `TZ` itself. In the next live run (19:10 IST) Claude passed the stricter gate on the first try ✅: `claude -p` took 30.4 s, its test sets `process.env.TZ` itself, and report → fixed took 57.4 s. The take recorded for the video passed it too: 57.0 s, with `claude -p` at 28.4 s. ✅
+
 The same step also runs in fixture mode, which applies a stored patch and says so in chat ("replayed, not generated"), for runs that shouldn't spend model calls. ✅
 
 `@runner` re-runs the environment matrix on the fix (4/4 green ✅). Then `@acme-env`, Meera's agent, asks her, installs that exact commit on her machine, re-runs her original repro, and posts **✅ FIXED ON MEERA'S MACHINE**. ✅
 
 The whole flow, live (the human lines are scripted):
 
-| | fixture fixer (s) | Claude Code fixer (s) |
-|---|---|---|
-| report posted | 2.1 | 2.1 |
-| NOT REPRODUCED in the vendor sandbox | 2.7 | 2.8 |
-| Meera's consent asked | 7.0 | 6.8 |
-| culprit `tz` | 14.9 | 14.7 |
-| CONFIRMED ON BOTH MACHINES card | 17.0 | 16.8 |
-| Switch refuses Dev's direct ask | 17.5 | 17.2 |
-| fix pushed | 21.1 | 70.5 |
-| **FIXED ON MEERA'S MACHINE** | **28.6** | **78.0** |
+| | fixture fixer (s) | Claude Code, first run (s) | Claude Code, stricter gate, recorded take (s) |
+|---|---|---|---|
+| report posted | 2.1 | 2.1 | 2.8 |
+| NOT REPRODUCED in the vendor sandbox | 2.7 | 2.8 | 3.5 |
+| Meera's consent asked | 7.0 | 6.8 | 7.5 |
+| culprit `tz` | 14.9 | 14.7 | 16.0 |
+| CONFIRMED ON BOTH MACHINES card | 17.0 | 16.8 | 18.2 |
+| Switch refuses Dev's direct ask | 17.5 | 17.2 | 18.6 |
+| fix pushed | 21.1 | 70.5 | 49.2 |
+| **FIXED ON MEERA'S MACHINE** | **28.6** | **78.0** | **57.0** |
 
-Fifteen agent-to-agent hops per run, no errors in the agent logs. ✅
+Each run has 15 tagged hops in the case history: 13 agent-to-agent `send_targeted` messages, plus `@acme-env`'s consent card and its FIXED post, which go to the room. No errors in the agent logs. ✅
+
+## Switch concept 6: a message the vendor can't forge
+
+The next day, Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom, in a **separate room** with their own agent, `@nepal-env`, which belongs to a **third** Switch owner. (This is an optional epilogue, `WOYM_KNOWN=1`.) Should the vendor run the whole investigation again?
+
+When case #1 was fixed, `@triage` wrote a small record: the culprit, a rule written from the root cause ("the UTC offset isn't a whole number of hours"), the fix branch and sha, and a pointer to **one message**: the FIXED post from `@acme-env`, Meera's own agent. The record holds no Meera values.
+
+The evidence is that message, not our record file. **Switch sets the sender of every message**, so no vendor agent and no vendor user can post as `@acme-env`. Before answering Kiran, `@triage` re-reads the message from room history (`read_context`) and checks it is still there, from the same sender, saying FIXED at the same sha:
+
+```python
+# woym/case/known.py: evidence_holds
+msg = next((m for m in msgs if m.message_id == e.message_id), None)
+if msg is None:
+    return False, "the FIXED message is no longer in room history"
+if msg.sender_id != e.sender_id or msg.sender_name != e.sender_name:
+    return False, f"the FIXED message is attributed to {msg.sender_name}, not {e.sender_name}"
+if not _is_fixed_post(msg, e.sender_name, fix.sha):
+    return False, "the FIXED message doesn't say passed at this sha"
+```
+
+Live ✅, Kiran's report to **KNOWN ISSUE · already fixed** took 2.6 s (3.0 s in the recorded take), with **0 sandbox runs**. Kiran still consents to sharing their environment first; the match is code, not a model. Nothing about Meera crosses into Kiran's room: only the case number, the fix branch and sha, and the rule. A FIXED tag pasted by a human, or by any other sender, fails the check, and the case is investigated normally (tested).
+
+Two Switch details made this work:
+- **One agent in two rooms means two connections.** `@triage` (and `@runner`) open one WebSocket per room with the same credentials, each with its own room claim. One connection that switches rooms with `connect_to_room` doesn't work: the other room goes deaf, or a post races into the wrong room. ✅ (platform's kill test)
+- **History and live events agree on sender ids.** `read_context` returns the same opaque `@switch-agent-…` sender as the live event, so the two strings can be compared directly. ✅ They change when the stack is wiped, and then old records simply fail the check.
+
+The honest limit: this protects against vendor agents and users *inside* Switch. Whoever runs the Switch server could rewrite its history. In our demo that's one laptop; in a real deployment, the server would be run by neither party, or by the customer.
 
 ## Honest limits
 
 - **Meera's "laptop" is a Docker container on the same host as the vendor's agents.** It isn't isolated from the vendor; anything with the Docker socket could reach it. What the demo proves is the Switch side: ownership, addressing, the refusal, consent and the shared record, plus `@acme-env`'s allow-list of 5 read-only probes. A real deployment runs `@acme-env` on the customer's own hardware.
 - The human lines in the demo are **scripted** (`scripts/humans.py`) and labelled as such.
-- The Claude Code fixer ran end to end in the room once. Model output varies between runs. Every fix, Claude's or the stored patch's, must pass the same test gate before anything is pushed. If Claude's edit fails the gate, none of it ships: the fixer says so in the thread, logs it, and falls back to the stored reference patch, labelled as replayed. If that fails too, the case stops. (Covered by `tests/agents/test_fixer.py::test_claude_edit_rejected` and `test_flow.py::test_claude_failure_falls_back_to_fixture_loudly`.) Since the live run, the gate also rejects a test that would only fail in the host's time zone, the weakness described above.
+- The Claude Code fixer has run end to end in the live room at least three times (78.0 s, then 57.4 s and the 57.0 s recorded take with the stricter gate). That's a handful of runs, not a benchmark, and model output varies between runs. Every fix, Claude's or the stored patch's, must pass the same test gate before anything is pushed. If Claude's edit fails the gate, none of it ships: the fixer says so in the thread, logs it, and falls back to the stored reference patch, labelled as replayed. If that fails too, the case stops. (Covered by `tests/agents/test_fixer.py::test_claude_edit_rejected` and `test_flow.py::test_claude_failure_falls_back_to_fixture_loudly`.) Since the first live run, the gate also rejects a test that would only fail in the host's time zone, the weakness described above.
 - One bug class, one library. The bisect varies 5 environment keys and won't find a cause outside them.
+- The epilogue's match rule was written by us from case #1's root cause, not learned. Kiran's room has no fixer, so a case there that doesn't match stops at *confirmed on both machines*.
+- Claude's edits, and our gate's test runs, happen on the host in a throwaway clone, not in the sandbox. Only allow-listed tools are allowed, and nothing ships unless the gate passes.
 
 ## If you're new to Switch: our checklist
 
@@ -234,6 +273,8 @@ Fifteen agent-to-agent hops per run, no errors in the agent logs. ✅
 6. Link chat accounts to Switch users if your rules use `owner`.
 7. Event ids are Switch `sw_…` ids, not chat post ids. Match participants by name.
 8. There's no message edit: plan your cards as new posts.
+9. One agent in two rooms = two connections, one per room. Never switch rooms on one connection.
+10. A message's sender is set by Switch. If you need proof that "the other side said so", re-read that message from history and compare the sender string.
 
 ## Try it
 
@@ -244,7 +285,7 @@ make up setup                        # Switch 0.31.0 + Mattermost via Docker Com
 make demo                            # scripted run, end to end
 ```
 
-`scripts/fresh-clone-test.sh` runs the first line from a clean clone; on our machine, with caches warm, it took 29 s, test suite included. ✅ [TODO: live result: timing on a cold machine.]
+`scripts/fresh-clone-test.sh` runs the first line from a clean clone. On our machine on Nov 5, with caches warm and images pre-pulled, it took 29 s, test suite included (the suite has grown since, so expect more). ✅ [TODO: live result: timing on a cold machine.]
 
 *Built in [TODO: final hours] by one human and four Claude Code sessions, each owning one part of the repo. Every failure, including the ones above, is in `ISSUES.md`.*
 

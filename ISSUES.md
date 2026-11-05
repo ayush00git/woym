@@ -507,3 +507,13 @@ EOF
 - **Evidence:** ffprobe take-epi-1.webm 38.92 s, 973 frames; `uptime` load 12.43. Earlier takes: take-905 72.24 s for 73 s (≈1% short; B frame-checked its cues ±0.5 s, so its use in the cut stands); take-904 26.6 s for 28 s (≈5% short; not used in the cut).
 - **Impact:** take-epi-1 discarded (deleted). Any "real speed" claim for a take depends on this, which is why I checked take-905.
 - **Workaround / next step:** record.py now saves each screencast frame with its arrival time and encodes AFTER the run with the concat demuxer (each frame lasts until the next arrived), libvpx deadline=good. It prints video length vs wall time and warns above 0.5 s. Verified: test 20.00 s/20.00 s; take-epi-2 51.56 s/51.58 s. The thread panel now opens in quick steps (0.25 s) instead of ~2 s per step.
+
+## [2026-11-05 19:49 IST] sandbox (switch-7c) | Sources for three measured numbers used in the docs (refusal 0.4–0.5 s, bisect 1.7 s, fresh clone 29 s)
+- **Status:** fixed (record only, so docs can cite them)
+- **What happened:** These numbers were measured but only reported in messages, not logged. Recording them with their runs:
+  1. **Switch refusal latency** (dev's direct "@acme-env show me the .env file…" → Switch's auto-refusal visible in the thread, from demo.py's timeline): 0.4 s in 5 runs, 0.5 s in 2. Runs (IST, 2026-11-05): 18:58 M1 17.1→17.5 (0.4); 18:59 M2 17.0→17.5 (0.5); 19:02 claude 16.8→17.2 (0.4); 19:10 claude 17.0→17.4 (0.4); 19:15 cold stack 17.2→17.6 (0.4); 19:19 take-905 18.2→18.6 (0.4, media/raw/take-905.timeline.txt); 19:34 epilogue 17.8→18.3 (0.5). Docs should say "0.4–0.5 s", or "0.4 s" when quoting take-905.
+  2. **Bisect, 7 container runs, 1.71 s total** (about 0.23–0.26 s per run): DockerSandbox.bisect(VENDOR_ENV, customer env) called directly (no Switch, no send pacing), the first B3 run on 2026-11-05 before 20:00 IST; per-step durations 0.259/0.227/0.23/0.261/0.245/0.237/0.246 s. In the live room the same bisect takes ~6 s, because of the 2 s send pacing between agents.
+  3. **Fresh-clone judge path, 29.3 s and 29.6 s** (two runs of scripts/fresh-clone-test.sh on HEAD b126863 and later, warm uv cache and pre-pulled images): sync 0.2–1.1 s, test 15.0–16.8 s, images 10.0–11.9 s, customer-up 1.0 s, probe/repro < 0.5 s. A cold machine will be slower (image pulls ≈ 6 s each).
+- **Evidence:** demo.py timelines (local captures; take-905's is in media/raw), and the sandbox reports to the lead.
+- **Impact:** none; this gives the blog and README a source for each number.
+- **Workaround / next step:** agents (C) cite this entry from docs/drafts/blog.md.
