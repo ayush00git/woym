@@ -50,7 +50,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 |---|---|---|---|
 | **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
 | **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `tests/switch/`, `docs/switch-notes.md` |
-| **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg` |
+| **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg`, `docs/drafts/` |
 | **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/` |
 
 ## 4. Work packages
@@ -109,6 +109,10 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 - **B9 Video assets:**
   - `media/cold-open.html`: a mock issue thread, Day 1 "can't repro" through Day 11 "Closed: works for me". It carries a visible "mock-up" label and is screen-recordable at 1920×1080.
   - `docs/trust-boundary.svg`: vendor side, customer side, the Switch room. It shows what crosses (the 5 consented values, results, the fix sha) and what never crosses (shell access, other env values). It needs to read in light and dark.
+
+- **B10 Side-track drafts** in `docs/drafts/`:
+  - `blog.md`: a build log that teaches Switch (Best Blog is judged on clarity, accuracy and help to a first-time user), with `[TODO: live result]` markers instead of made-up numbers;
+  - `howiswitch.md`: social post variants.
 
 ### C: Agents (switch-90)
 - **C1 Case core** in `woym/case/`:
