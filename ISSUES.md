@@ -447,3 +447,10 @@ EOF
 - **Evidence:** lead's decision message; scripts/video/build_rough_cut.py b_members().
 - **Impact:** the beat now shows the take's real members panel unaltered ("9 members"). admin, camera and user are dimmed with a 55% dark box, not removed. The side text says "members panel from the recorded take, nothing removed · dimmed: setup and recording accounts". The caption is overridden in the build script: "Owners come from registration keys" + small "admin/user: Switch's setup accounts · camera: the recording account".
 - **Workaround / next step:** B should update the beat 3 caption cell in docs/drafts/video-script.md to match (the build script overrides it until then). Rule for later edits: dim or highlight, never remove.
+
+## [2026-11-05 19:36 IST] sandbox (switch-7c) | First live epilogue passed; KNOWN card shows "uTC" (cosmetic, agents to fix)
+- **Status:** open (cosmetic; reported to agents)
+- **What happened:** `WOYM_KNOWN=1 demo.py --fixer fixture --epilogue` at 19:34:27 IST: exit 0. Case 1 FIXED at 30.0 s; Kiran's case 2 KNOWN at 32.8 s (2.6 s after her report). 0 sandbox runs for case 2 (case history, empty runner.log, 0 containers in docker events); the evidence re-read (read_context) happened 30 ms before the card; no Meera value or name in acme-nepal (6 posts scanned). The card text says "the uTC offset is not a whole number of hours".
+- **Evidence:** woym/case/card.py:268 `rule[:1].lower() + rule[1:]` applied to "UTC offset is not a whole number of hours".
+- **Impact:** a visible typo on the epilogue's KNOWN card, if it's recorded.
+- **Workaround / next step:** agents (C) to fix the casing; re-record the epilogue after the fix if it goes in the video.
