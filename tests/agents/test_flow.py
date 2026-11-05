@@ -275,3 +275,26 @@ async def test_redelivered_events_are_handled_once(tmp_path):
     w.bus.queue.append((req, "runner"))
     await w.bus.settle()
     assert len(w.sandbox.calls) == runs
+
+
+@pytest.mark.parametrize("agent_name,human,pid", [
+    (None, "meera", "@switch-mattermost-b-meera:localhost"),
+    ("nepal-env", "kiran", "@switch-mattermost-b-kiran:localhost"),
+])
+def test_acme_env_main_checks_consent_by_sender_id(monkeypatch, agent_name, human, pid):
+    """README: consent is 'checked by sender id'. main() must pass the recorded id."""
+    from woym.agents import acme_env
+    from woym.switch import creds
+
+    data = {"humans": {"meera": {"switch_participant_id": "@switch-mattermost-b-meera:localhost"},
+                       "kiran": {"switch_participant_id": "@switch-mattermost-b-kiran:localhost"}}}
+    monkeypatch.setattr(creds, "load", lambda *a, **k: data)
+    if agent_name:
+        monkeypatch.setenv("WOYM_AGENT_NAME", agent_name)
+    else:
+        monkeypatch.delenv("WOYM_AGENT_NAME", raising=False)
+    got = {}
+    monkeypatch.setattr(acme_env, "run_agent", lambda make, name, **kw: got.update(make=make, name=name))
+    acme_env.main()
+    agent = got["make"](FakeBus().client(got["name"]))
+    assert agent.customer == human and agent.customer_id == pid

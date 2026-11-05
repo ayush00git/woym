@@ -15,6 +15,7 @@ the customer human, in the consent thread (woym.case.consent).
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -23,6 +24,8 @@ from woym.agents.base import Agent, from_agent, run_agent, to_thread
 from woym.case import card, tags
 from woym.case.consent import ConsentRequest, Verdict, evaluate
 from woym.contracts import ENV_KEYS, CustomerMachine, MessageEvent, Step, SwitchClient
+
+log = logging.getLogger("woym.agents")
 
 ALLOWED_OVERRIDES = {"tz", "lang"}
 # Consent wording when triage may answer from a known fix (WOYM_KNOWN): runs aren't certain.
@@ -203,11 +206,27 @@ def main() -> None:
     ask = os.environ.get("WOYM_INSTALL_CONSENT", "1") != "0"
     name = os.environ.get("WOYM_AGENT_NAME", config.AGENT_CUSTOMER)
     if name == config.AGENT_CUSTOMER:
-        run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(), ask_before_install=ask), name)
+        cid = customer_id(config.CUSTOMER_HUMAN)
+        run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(), customer_id=cid, ask_before_install=ask), name)
         return
     room, human, container = customer_for(name)
+    cid = customer_id(human)
     run_agent(lambda c: AcmeEnvAgent(c, DockerCustomerMachine(container=container), customer=human,
-                                     ask_before_install=ask, name=name), name, room=room)
+                                     customer_id=cid, ask_before_install=ask, name=name), name, room=room)
+
+
+def customer_id(human: str) -> str | None:
+    """The customer's Switch sender id (setup records it from room history), so consent
+    is checked by id, not just by display handle. None if setup hasn't recorded it."""
+    from woym.switch import creds
+
+    try:
+        pid = creds.load().get("humans", {}).get(human, {}).get("switch_participant_id")
+    except FileNotFoundError:
+        return None
+    if not pid:
+        log.warning("no switch_participant_id for %s in credentials.json: consent falls back to the handle", human)
+    return pid or None
 
 
 if __name__ == "__main__":

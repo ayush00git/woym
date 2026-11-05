@@ -478,3 +478,10 @@ EOF
 - **Evidence:** setup output, rc=0.
 - **Impact:** record.py can watch acme-nepal as camera (`--room acme-nepal`).
 - **Workaround / next step:** none.
+
+## [2026-11-05 19:41 IST] agents (switch-90) | acme-env consent was checked by handle, not sender id (README claimed id)
+- **Status:** fixed (uncommitted, sent to lead)
+- **What happened:** The C12 README audit found that README "every share and every install needs Meera's yes … (checked by sender id)" was false. woym/agents/acme_env.py:main() never passed `customer_id` to AcmeEnvAgent, so woym/case/consent.py:is_from_customer fell back to `sender_name == "meera"` plus sender_kind human. triage did check by id (humans.<h>.switch_participant_id); acme-env didn't.
+- **Evidence:** acme_env.py main() built `AcmeEnvAgent(c, DockerCustomerMachine(), ask_before_install=ask)` with no customer_id.
+- **Impact:** A Mattermost user who could appear with sender_name "meera" but a different id would have been accepted as Meera's consent. The live risk is low (a human sender_name is the MM username, and setup controls the users), but the security claim was overstated. Recorded takes before the fix used the handle check.
+- **Workaround / next step:** main() now passes humans.<customer>.switch_participant_id for acme-env and nepal-env, and logs a warning and falls back to the handle if it's missing. Test: tests/agents/test_flow.py::test_acme_env_main_checks_consent_by_sender_id.
