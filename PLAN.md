@@ -49,7 +49,7 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 | Who | Session | Role | Owns |
 |---|---|---|---|
 | **Lead** | switch-b6 | Plan, contracts, review, **all git commits**, integration, README, video | shared files above, `docs/` except `docs/switch-notes.md` and `docs/trust-boundary.svg` |
-| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `scripts/record.py`, `tests/switch/`, `docs/switch-notes.md` |
+| **A: Platform** | switch-ba | Switch stack, kill test, real protocol client, setup scripts, scripted human replies | `infra/switch/`, `woym/switch/`, `scripts/killtest/`, `scripts/setup.sh`, `scripts/humans.py`, `scripts/status.py`, `scripts/record.py`, `scripts/video/`, `tests/switch/`, `docs/switch-notes.md` |
 | **B: Sandbox** | switch-7c | bizclock fixture and bug, vendor runner, bisect, matrix, customer machine, bare remote. From 20:30 on Nov 5 also: demo orchestration, reset, fresh-clone test, video assets | `fixtures/`, `woym/sandbox/`, `infra/acme-laptop/`, `tests/sandbox/`, `scripts/pull-images.sh`, `scripts/demo.py`, `scripts/reset.sh`, `scripts/fresh-clone-test.sh`, `media/`, `docs/trust-boundary.svg`, `docs/drafts/` |
 | **C: Agents** | switch-90 | Case state machine, wire tags, cards, consent, fixer, the four agent processes | `woym/case/`, `woym/fixer/`, `woym/agents/`, `tests/case/`, `tests/agents/`, `docs/switch-usage.md` |
 
@@ -79,6 +79,8 @@ Coworkers edit **only** their own paths. Shared files belong to the lead: `woym/
 
 - **A9 Cold-stack test.** Done: wipe → up 12 s → setup 7 s → demo FIXED 28.7 s, with zero human steps.
 - **A10 Epilogue setup** (WOYM_KNOWN): third owner kiran, agent nepal-env, room acme-nepal (not activated), kiran's rule admitting only triage. Verify read_context `sender` == live sender_id for agent posts.
+
+- **A11 Rough cut.** `scripts/video/` builds `media/raw/rough-cut.mp4` (~3:00, burned-in captions, no narration yet) from the cold open, take-905, the trust diagram, the Switch-usage slide and a terminal shot, following `docs/drafts/video-script.md`. Reproducible.
 
 ### B: Sandbox (switch-7c)
 - **B1 bizclock** in `fixtures/bizclock/`:
