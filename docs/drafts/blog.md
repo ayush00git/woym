@@ -229,7 +229,7 @@ Each run has 15 tagged hops in the case history: 13 agent-to-agent `send_targete
 
 ## Switch concept 6: a message the vendor can't forge
 
-The next day, Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom, in a **separate room** with their own agent, `@nepal-env`, which belongs to a **third** Switch owner. (This is an optional epilogue, `WOYM_KNOWN=1`.) Should the vendor run the whole investigation again?
+Then, in the same demo run, Kiran at Acme Nepal (`TZ=Asia/Kathmandu`, +05:45) reports the same symptom, in a **separate room** with their own agent, `@nepal-env`, which belongs to a **third** Switch owner. (This is an optional epilogue, `WOYM_KNOWN=1`.) Should the vendor run the whole investigation again?
 
 When case #1 was fixed, `@triage` wrote a small record: the culprit, a rule written from the root cause ("the UTC offset isn't a whole number of hours"), the fix branch and sha, and a pointer to **one message**: the FIXED post from `@acme-env`, Meera's own agent. The record holds no Meera values.
 
