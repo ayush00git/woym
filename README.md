@@ -51,7 +51,7 @@ Every number below is from a full run on one laptop against a local Switch 0.31.
 | Full flow, stored reference fix (`FIXER=fixture`) | **28.6 s** |
 | Full flow, **real Claude Code fix** (`FIXER=claude`) | **78.0 s** (fix step 52.9 s, from request to pushed) |
 
-In the live Claude run, Claude changed one function to use exact minutes instead of rounded hours and added a regression test. A hidden reference test, which Claude never saw, also passes against its fix.
+In the live Claude run, Claude changed one function to use exact minutes instead of rounded hours and added a regression test. A hidden reference test, which Claude never saw, also passes against its fix. One catch: Claude's test only failed when the host itself was in IST, so it wouldn't have guarded the vendor's UTC CI. We then tightened the gate. A new test must now fail on the old code under **both** UTC and IST, and the prompt asks for a test that sets `TZ` itself. <!-- TODO(lead): re-run FIXER=claude with the stricter gate and update this paragraph with the result. -->
 
 ## How Switch is used
 
