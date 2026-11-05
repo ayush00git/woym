@@ -62,6 +62,7 @@ Every number below is from a run on one laptop against a local Switch 0.31.0 sta
 | Same, the recorded take used in the video | **57.0 s** (`claude -p` 28.4 s; gate 0.5 s) |
 | Full flow on a freshly wiped stack (`FIXER=fixture`) | **28.7 s** (setup 7 s, no human steps) |
 | Epilogue: Kiran's report → KNOWN ISSUE card (`WOYM_KNOWN=1`) | **2.6 s**, 0 sandbox runs (checked in case history, runner log and `docker events`), evidence re-read from room history |
+| Epilogue, the recorded take used in the video | **3.0 s** from Kiran's report to the KNOWN card |
 
 In the live Claude run, Claude changed one function to use exact minutes instead of rounded hours and added a regression test. A hidden reference test, which Claude never saw, also passes against its fix. One catch: Claude's test only failed when the host itself was in IST, so it wouldn't have guarded the vendor's UTC CI. We then tightened the gate. A new test must now fail on the old code under **both** UTC and IST, and the prompt asks for a test that sets `TZ` itself. In the next live run (19:10 IST, report → fixed in 57.4 s) Claude passed the stricter gate first try. `claude -p` took 30.4 s, its test sets `process.env.TZ` itself, and the test fails on the old code in both zones. At the fix, the suite passes in UTC, Kolkata, Kathmandu and St. John's.
 
